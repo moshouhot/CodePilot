@@ -166,7 +166,13 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
         }
 
         if (systemPrompt) {
-          queryOptions.systemPrompt = systemPrompt;
+          // Use preset append mode to keep Claude Code's default system prompt
+          // (which includes skills, working directory awareness, etc.)
+          queryOptions.systemPrompt = {
+            type: 'preset',
+            preset: 'claude_code',
+            append: systemPrompt,
+          };
         }
 
         if (mcpServers && Object.keys(mcpServers).length > 0) {
