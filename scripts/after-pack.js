@@ -27,12 +27,14 @@ module.exports = async function afterPack(context) {
   }
 
   // Find all better_sqlite3.node files inside the standalone resources
-  const resourcesDir = path.join(appOutDir, 'CodePilot.app', 'Contents', 'Resources');
-  // On macOS the structure is: <appOutDir>/CodePilot.app/Contents/Resources/standalone/...
-  // But appOutDir might already point to the .app parent, so try both
+  // macOS: <appOutDir>/CodePilot.app/Contents/Resources/standalone/...
+  // Windows/Linux: <appOutDir>/resources/standalone/...
   const searchRoots = [
-    path.join(resourcesDir, 'standalone'),
+    // macOS paths
+    path.join(appOutDir, 'CodePilot.app', 'Contents', 'Resources', 'standalone'),
     path.join(appOutDir, 'Contents', 'Resources', 'standalone'),
+    // Windows/Linux paths
+    path.join(appOutDir, 'resources', 'standalone'),
   ];
 
   let replaced = 0;
