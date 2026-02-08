@@ -27,10 +27,41 @@ jobs:
       - name: Fetch upstream
         run: git fetch upstream
 
+      - name: Check for updates
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          if [ "$LOCAL" = "$UPSTREAM" ] || git merge-base --is-ancestor upstream/main HEAD; then
+            echo "No new commits from upstream"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream has new commits"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Rebase onto upstream
+        if: steps.check.outputs.has_updates == 'true'
         run: |
           git checkout main
           git rebase upstream/main
 
       - name: Push changes
+        if: steps.check.outputs.has_updates == 'true'
         run: git push origin main --force-with-lease
+
+      - name: Get version and create release tag
+        if: steps.check.outputs.has_updates == 'true'
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          TAG="v${VERSION}-build.${TIMESTAMP}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
