@@ -85,11 +85,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Package Windows (arm64)
-        run: npx electron-builder --win --arm64 --config electron-builder.yml
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
