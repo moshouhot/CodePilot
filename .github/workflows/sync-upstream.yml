@@ -24,8 +24,8 @@ jobs:
       - name: Add upstream remote
         run: git remote add upstream https://github.com/op7418/CodePilot.git
 
-      - name: Fetch upstream with tags
-        run: git fetch upstream --tags
+      - name: Fetch upstream
+        run: git fetch upstream
 
       - name: Check for upstream version update
         id: check
@@ -34,12 +34,16 @@ jobs:
           UPSTREAM_VERSION=$(git show upstream/main:package.json | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
           echo "Upstream version: $UPSTREAM_VERSION"
 
-          # 检查本地是否已有该版本的 release tag
-          if git tag -l "v${UPSTREAM_VERSION}" | grep -q "v${UPSTREAM_VERSION}"; then
-            echo "Version v${UPSTREAM_VERSION} already released"
+          # 获取本地当前版本号
+          LOCAL_VERSION=$(cat package.json | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+          echo "Local version: $LOCAL_VERSION"
+
+          # 比较版本号
+          if [ "$LOCAL_VERSION" = "$UPSTREAM_VERSION" ]; then
+            echo "Version $UPSTREAM_VERSION already synced"
             echo "has_updates=false" >> $GITHUB_OUTPUT
           else
-            echo "New version detected: v${UPSTREAM_VERSION}"
+            echo "New version detected: $UPSTREAM_VERSION (current: $LOCAL_VERSION)"
             echo "has_updates=true" >> $GITHUB_OUTPUT
             echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           fi
@@ -58,6 +62,8 @@ jobs:
         if: steps.check.outputs.has_updates == 'true'
         run: |
           VERSION=${{ steps.check.outputs.version }}
-          git tag "v${VERSION}"
+          # 删除旧的同版本 tag（如果存在）
+          git push origin :refs/tags/v${VERSION} 2>/dev/null || true
+          git tag -f "v${VERSION}"
           git push origin "v${VERSION}"
           echo "Created and pushed tag: v${VERSION}"
