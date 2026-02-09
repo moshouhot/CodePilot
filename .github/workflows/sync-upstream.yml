@@ -24,20 +24,24 @@ jobs:
       - name: Add upstream remote
         run: git remote add upstream https://github.com/op7418/CodePilot.git
 
-      - name: Fetch upstream
-        run: git fetch upstream
+      - name: Fetch upstream with tags
+        run: git fetch upstream --tags
 
-      - name: Check for updates
+      - name: Check for upstream version update
         id: check
         run: |
-          LOCAL=$(git rev-parse HEAD)
-          UPSTREAM=$(git rev-parse upstream/main)
-          if [ "$LOCAL" = "$UPSTREAM" ] || git merge-base --is-ancestor upstream/main HEAD; then
-            echo "No new commits from upstream"
+          # 获取上游最新版本号
+          UPSTREAM_VERSION=$(git show upstream/main:package.json | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+          echo "Upstream version: $UPSTREAM_VERSION"
+
+          # 检查本地是否已有该版本的 release tag
+          if git tag -l "v${UPSTREAM_VERSION}" | grep -q "v${UPSTREAM_VERSION}"; then
+            echo "Version v${UPSTREAM_VERSION} already released"
             echo "has_updates=false" >> $GITHUB_OUTPUT
           else
-            echo "Upstream has new commits"
+            echo "New version detected: v${UPSTREAM_VERSION}"
             echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           fi
 
       - name: Rebase onto upstream
@@ -50,18 +54,10 @@ jobs:
         if: steps.check.outputs.has_updates == 'true'
         run: git push origin main --force-with-lease
 
-      - name: Get version and create release tag
-        if: steps.check.outputs.has_updates == 'true'
-        id: version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          TAG="v${VERSION}-build.${TIMESTAMP}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create and push tag
+      - name: Create and push version tag
         if: steps.check.outputs.has_updates == 'true'
         run: |
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
+          VERSION=${{ steps.check.outputs.version }}
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+          echo "Created and pushed tag: v${VERSION}"
