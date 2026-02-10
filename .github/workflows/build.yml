@@ -46,10 +46,45 @@ jobs:
             release/*.dmg.blockmap
           retention-days: 30
 
+      - name: Get version
+        if: startsWith(github.ref, 'refs/tags/')
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          name: CodePilot v${{ steps.version.outputs.version }}
+          body: |
+            ## Downloads
+
+            ### macOS
+            - **CodePilot-${{ steps.version.outputs.version }}-arm64.dmg** — macOS Apple Silicon (M1/M2/M3/M4)
+            - **CodePilot-${{ steps.version.outputs.version }}-x64.dmg** — macOS Intel
+
+            ### Windows
+            - **CodePilot-${{ steps.version.outputs.version }}-x64.exe** — Windows x64
+            - **CodePilot-${{ steps.version.outputs.version }}-arm64.exe** — Windows ARM64
+
+            ## Installation
+
+            ### macOS
+            1. 下载对应芯片架构的 DMG 文件
+            2. 打开 DMG，将 CodePilot 拖入 Applications 文件夹
+            3. 首次打开时如遇安全提示，前往 **系统设置 → 隐私与安全性** 点击"仍要打开"
+            4. 在 Settings 页面配置 Anthropic API Key 或环境变量
+
+            ### Windows
+            1. 下载对应架构的 EXE 安装包（大多数用户选择 x64）
+            2. 运行安装程序，可自定义安装路径
+            3. 安装完成后启动 CodePilot
+            4. 在 Settings 页面配置 Anthropic API Key 或环境变量
+
+            ## Requirements
+            - macOS 12.0+ / Windows 10+
+            - Anthropic API Key 或已配置 `ANTHROPIC_API_KEY` 环境变量
+            - 如需使用代码相关功能，建议安装 Claude Code CLI
           files: |
             release/*.dmg
             release/*.dmg.blockmap
