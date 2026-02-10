@@ -85,6 +85,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Package Windows (arm64)
+        run: npx electron-builder --win --arm64 --config electron-builder.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -92,6 +97,8 @@ jobs:
           path: |
             release/*-x64.exe
             release/*-x64.exe.blockmap
+            release/*-arm64.exe
+            release/*-arm64.exe.blockmap
           retention-days: 30
 
       - name: Release
@@ -101,6 +108,8 @@ jobs:
           files: |
             release/*-x64.exe
             release/*-x64.exe.blockmap
+            release/*-arm64.exe
+            release/*-arm64.exe.blockmap
           draft: false
           prerelease: false
         env:
