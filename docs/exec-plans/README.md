@@ -48,6 +48,4 @@
 
 ### Completed
 
-| 文件 | 主题 | 完成日期 |
-|------|------|----------|
-| completed/engineering-quality-assurance.md | 工程质量保障体系（Harness Engineering）— 验证闭环、AI 文档、CDP、执行计划 | 2026-03-04 |
+（暂无）
