@@ -1,6 +1,9 @@
-name: Build & Package
+name: Build & Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       platform:
@@ -12,157 +15,14 @@ on:
           - all
           - windows
           - macos
-          - linux
-  pull_request:
-    branches: [main]
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  lint-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        # TODO: fix 4 existing lint errors then remove continue-on-error
-        continue-on-error: true
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm run test:unit
-
-  build-windows:
-    needs: [lint-test]
-    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Electron app
-        run: npm run electron:build
-
-      - name: Package for Windows
-        run: npx electron-builder --win --config electron-builder.yml --publish never
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-windows
-          path: |
-            release/*.exe
-          retention-days: 3
-
   build-macos:
-    needs: [lint-test]
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
     runs-on: macos-latest
-    env:
-      HAS_CERT: ${{ secrets.MAC_CERT_P12_BASE64 != '' && 'true' || 'false' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Electron app
-        run: npm run electron:build
-
-      - name: Decode signing certificate
-        env:
-          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
-          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        run: |
-          if [ "${HAS_CERT}" != "true" ]; then
-            echo "::error::Missing signing certificate (MAC_CERT_P12_BASE64 secret not set)"
-            exit 1
-          fi
-          printf '%s' "$MAC_CERT_P12_BASE64" | tr -d '\r\n' | base64 --decode > /tmp/cert.p12
-          openssl pkcs12 -in /tmp/cert.p12 -passin pass:"$MAC_CERT_PASSWORD" -noout
-          echo "Certificate decoded and validated"
-
-      - name: Package for macOS (x64 + arm64, sign only)
-        timeout-minutes: 15
-        env:
-          CSC_LINK: /tmp/cert.p12
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        run: npx electron-builder --mac --config electron-builder.yml --publish never
-
-      - name: Verify code signature
-        run: |
-          APPS=$(find release -name "CodePilot.app" -maxdepth 3)
-          if [ -z "$APPS" ]; then
-            echo "::error::No CodePilot.app found after build"
-            exit 1
-          fi
-
-          FAILED=0
-          while IFS= read -r APP_PATH; do
-            echo "========== Verifying: $APP_PATH =========="
-            codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee /tmp/codesign-info.txt || true
-
-            if ! grep -q 'Authority=Developer ID Application' /tmp/codesign-info.txt; then
-              echo "::error::$APP_PATH is NOT signed with Developer ID Application"
-              FAILED=1
-              continue
-            fi
-
-            if ! grep -q 'TeamIdentifier=K9X599X9Q2' /tmp/codesign-info.txt; then
-              echo "::error::$APP_PATH has unexpected TeamIdentifier"
-              FAILED=1
-              continue
-            fi
-
-            codesign --verify --deep --strict --verbose=4 "$APP_PATH"
-            echo "✓ $APP_PATH passed all checks"
-          done <<< "$APPS"
-
-          if [ "$FAILED" -ne 0 ]; then
-            echo "::error::One or more .app bundles failed signature verification"
-            exit 1
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-macos
-          path: |
-            release/*.dmg
-            release/*.zip
-          retention-days: 3
-
-  build-linux:
-    needs: [lint-test]
-    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         arch: [x64, arm64]
@@ -177,25 +37,62 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Electron app
-        run: npm run electron:build
+      - name: Build Next.js
+        run: npm run build
 
-      - name: Package for Linux (${{ matrix.arch }})
-        run: npx electron-builder --linux --${{ matrix.arch }} --config electron-builder.yml --publish never
+      - name: Build Electron
+        run: node scripts/build-electron.mjs
 
-      - name: Upload artifacts
+      - name: Package macOS (${{ matrix.arch }})
+        run: npx electron-builder --mac --${{ matrix.arch }} --config electron-builder.yml --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-linux-${{ matrix.arch }}
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.rpm
-          retention-days: 3
+          name: macos-${{ matrix.arch }}
+          path: release/*.dmg
+          if-no-files-found: warn
+
+  build-windows:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build Electron
+        run: node scripts/build-electron.mjs
+
+      - name: Package Windows (${{ matrix.arch }})
+        run: npx electron-builder --win --${{ matrix.arch }} --config electron-builder.yml --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: release/*.exe
+          if-no-files-found: warn
 
   release:
     if: ${{ always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(needs.*.result, 'cancelled') }}
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -206,10 +103,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
-
-      - name: List artifacts
-        run: find artifacts -type f | sort
 
       - name: Get version and previous tag
         id: meta
@@ -235,7 +128,13 @@ jobs:
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create release and upload assets
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' \) ! -name '*.blockmap' -exec cp {} release-files/ \;
+          ls -lh release-files/
+
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -245,33 +144,33 @@ jobs:
           cat > release-notes.md << 'NOTES_EOF'
           ## Downloads
 
-          **Windows**
-          - **CodePilot Setup ${{ steps.meta.outputs.version }}.exe** — Windows installer (x64 + arm64)
-
           **macOS**
           - **CodePilot-${{ steps.meta.outputs.version }}-arm64.dmg** — macOS Apple Silicon (M1/M2/M3/M4)
           - **CodePilot-${{ steps.meta.outputs.version }}-x64.dmg** — macOS Intel
 
-          **Linux**
-          - **AppImage / deb / rpm** — x64 and arm64
+          **Windows**
+          - **CodePilot-${{ steps.meta.outputs.version }}-x64.exe** — Windows x64
+          - **CodePilot-${{ steps.meta.outputs.version }}-arm64.exe** — Windows ARM64
 
           ## Installation
 
-          **Windows**: Download the exe installer, double-click to install.
-
           **macOS**:
-          1. Download the DMG for your chip architecture
-          2. Open the DMG, drag CodePilot into Applications
-          3. If you see a security prompt on first launch, go to **System Settings > Privacy & Security** and click "Open Anyway"
-          4. Configure your Anthropic API Key in Settings
+          1. 下载对应芯片架构的 DMG 文件
+          2. 打开 DMG，将 CodePilot 拖入 Applications 文件夹
+          3. 首次打开时如遇安全提示，前往 **系统设置 → 隐私与安全性** 点击"仍要打开"
+          4. 在 Settings 页面配置 Anthropic API Key 或环境变量
 
-          **Linux**: Run the AppImage directly, or install via deb/rpm package.
+          **Windows**:
+          1. 下载对应架构的 EXE 安装包（大多数用户选择 x64）
+          2. 运行安装程序，可自定义安装路径
+          3. 安装完成后启动 CodePilot
+          4. 在 Settings 页面配置 Anthropic API Key 或环境变量
 
           ## Requirements
 
-          - Windows 10+ / macOS 12.0+ / Linux (glibc 2.31+)
-          - Anthropic API Key or `ANTHROPIC_API_KEY` environment variable
-          - Claude Code CLI recommended for code features
+          - macOS 12.0+ / Windows 10+
+          - Anthropic API Key 或已配置 `ANTHROPIC_API_KEY` 环境变量
+          - 如需使用代码相关功能，建议安装 Claude Code CLI
 
           ## Changelog
           NOTES_EOF
@@ -280,19 +179,11 @@ jobs:
             echo "" >> release-notes.md
             echo "| Commit | Description |" >> release-notes.md
             echo "|--------|-------------|" >> release-notes.md
-            cat >> release-notes.md << 'CHANGELOG_INLINE_EOF'
-          ${{ steps.changelog.outputs.changelog }}
-          CHANGELOG_INLINE_EOF
+            echo '${{ steps.changelog.outputs.changelog }}' >> release-notes.md
           fi
-
-          # Collect release files: installers only (no blockmap / update metadata)
-          FILES=()
-          while IFS= read -r f; do
-            FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | sort)
 
           gh release create "${GITHUB_REF_NAME}" \
             --title "CodePilot v${VERSION}" \
             --notes-file release-notes.md \
             --latest \
-            "${FILES[@]}"
+            release-files/*
