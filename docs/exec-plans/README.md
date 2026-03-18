@@ -45,10 +45,7 @@
 | 文件 | 主题 | 状态 |
 |------|------|------|
 | active/context-storage-migration.md | 上下文共享与存储迁移 | Phase 0 部分完成，Phase 1-3 待开始 |
-| active/site-and-docs.md | 官网 + 文档站（apps/site） | Phase 0-1 进行中 |
 
 ### Completed
 
-| 文件 | 主题 | 完成日期 |
-|------|------|----------|
-| completed/engineering-quality-assurance.md | 工程质量保障体系（Harness Engineering）— 验证闭环、AI 文档、CDP、执行计划 | 2026-03-04 |
+（暂无）
