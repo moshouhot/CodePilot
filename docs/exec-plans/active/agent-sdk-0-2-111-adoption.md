@@ -1,7 +1,5 @@
 # Claude Agent SDK 0.2.111 能力采纳
 
-> ⚠️ **Superseded by [refactor-closeout.md](./refactor-closeout.md)** — 不再单独推进，保留作历史参考。SDK 升级已完成；剩余 chip / 限流 UI / WarmQuery / session fork / getContextUsage 等能力按需并入 refactor-closeout 的 **Phase 2（Runtime 与会话执行）** 与 **Phase 5（上下文可视化）**。
-
 > 创建时间：2026-04-17
 > 最后更新：2026-04-17
 > 关联计划：[opus-4-7-upgrade.md](./opus-4-7-upgrade.md)（本计划依赖其 Phase 0 的 SDK bump）
@@ -40,13 +38,12 @@ Typings 从 2189 行扩到 4827 行（+120%），**纯增量、无 breaking 删�
 - 发消息 / 删除 / 覆盖 / 跨 session 影响 / 自动重试 / 外部导航 / 跨模型切换 / 阻断式浮层
 - **必须**：显式确认按钮 + 可取消出口 + 取消后保留 draft + 动作前预览关键信息（domain / 来源 / 用途）
 
-**本计划自检（2026-04-18）：**
+**本计划自检（2026-04-17）：**
 
 | Phase | 价值形态 | 说明 |
 |-------|---------|------|
 | Phase 0 | C | POC，Layer B 的前置，不独立发版 |
-| Phase 1 | A | 结束态 chip（chip 展示层） |
-| **Phase 1b** | **A** | **chip 可操作按钮（压缩并重试 / 切 Sonnet / 开启 1M / 继续 / ...），闭环用户动作** |
+| Phase 1 | A | 结束态 chip |
 | Phase 2 | A | 订阅路径限流 UI |
 | Phase 2b | C | 类型适配，跟随 Layer A 宿主 Phase |
 | Phase 3 | **B** | 纯静默预热，P50 不降 30% 则砍 |
@@ -55,76 +52,6 @@ Typings 从 2189 行扩到 4827 行（+120%），**纯增量、无 breaking 删�
 | Phase 6 | A | Hook 驱动的通知/同步 |
 | Phase 7a | A | Elicitation 表单/授权卡片 |
 | Phase 7b | A | Deferred tool 响应卡片 |
-
-## 推进路线图（按用户价值 × 确定性 × 依赖关系排序）
-
-本计划共 11 个 Phase，不是线性顺序执行——以下是建议的**用户视角推进路径**，每个阶段列出核心能力、依赖、以及何时可以发版给用户感知。
-
-### 🎯 阶段 1 — 立刻能做（不需要 POC，1-2 周可发版）
-
-| 顺序 | Phase | 用户感知 | 依赖 | 工作量 |
-|------|-------|----------|------|--------|
-| 1.1 | **Phase 1b** chip 按钮化 | Claude 停下时一键「压缩并重试 / 切 Sonnet / 开启 1M」，不再手动找设置 | Phase 1 已完成（chip 骨架在） | 中（2-3 天） |
-| 1.2 | **Phase 2** 限流 UI | 订阅版限流时弹倒计时 banner + 一键切小模型 | 无（订阅路径专属） | 小-中（2-3 天） |
-
-**发版时机**：两个都做完一起发一个小版本。用户第一次在 Opus 4.7 长会话里触顶、或遇到限流时立刻感知。
-
-### 🔬 阶段 2 — 跑 POC 拿决策数据（半天）
-
-```bash
-CLAUDE_SDK_POC=1 npm run test:sdk-poc
-```
-
-三个 POC 产出三个 go/no-go 信号（写到 `docs/research/agent-sdk-0-2-111-capabilities.md.json`）：
-
-| POC | 决定什么 | 如果失败 |
-|-----|---------|----------|
-| `hooks-poc` | Claude Code SDK 0.2.111 的 hook 通路能否在 CodePilot 真 queryOptions 组合下工作 | Phase 6 降级为流消息反推、Phase 7b 推迟 |
-| `warm-query-poc` | WarmQuery 预热能否让首字延迟 p50 下降 ≥30% | Phase 3 整体砍掉 |
-| `multi-defer-poc` | SDK 单轮能否产生多个并发 deferred_tool_use | Phase 7b 只做单 defer UI，不做合并 drawer |
-
-### 🌿 阶段 3 — 核心 UX 能力（基于 POC 结果推进，3-5 周）
-
-| 顺序 | Phase | 用户感知 | 依赖 |
-|------|-------|----------|------|
-| 3.1 | **Phase 6** 新 hooks（PostCompact 优先） | 压缩过程聊天流里可见；cwd 切换 FileTree 自动跟；权限拒绝不刷屏改汇总徽章 | `hooks-poc` 通过 |
-| 3.2 | **Phase 4** Session fork | "从这条消息分叉对话" → 保留原会话 + 新开子分支 | DB migration（加 `parent_session_id` 列） |
-
-**发版时机**：Phase 6 优先发（PostCompact 改动小、价值高）。Phase 4 的 fork 单独一版（DB schema 变动要充分回归）。
-
-### ⚡ 阶段 4 — 性能与精度（按需做，各 1-2 周）
-
-| 顺序 | Phase | 用户感知 | 依赖 |
-|------|-------|----------|------|
-| 4.1 | **Phase 3** WarmQuery 预热 | 打开历史会话发首条消息不再卡顿 | `warm-query-poc` p50 ≥30% 下降 |
-| 4.2 | **Phase 5** getContextUsage | Context indicator 精度 <5% 偏差 | 无（已有 fallback） |
-
-两项都是"有了更好、没有也能将就"。不是用户反馈痛点就不急。
-
-### 🔌 阶段 5 — MCP 交互升级（2-3 周）
-
-| 顺序 | Phase | 用户感知 | 依赖 |
-|------|-------|----------|------|
-| 5.1 | **Phase 7a** Elicitation | MCP 工具中途问你参数（如 Notion 存哪个库），聊天流里弹表单 | `hooks-poc` 通过（共享 SDK 事件机制） |
-| 5.2 | **Phase 7b** Deferred tools | AskUserQuestion 类工具响应更连贯 | `multi-defer-poc` + `hooks-poc` 都通过 |
-
----
-
-### 不在路线图的 Phase 补充说明
-
-- **Phase 0**：是 POC 本身，列为阶段 2 的前置动作，不独立推进。
-- **Phase 1 / Phase 2b**：本次 SDK 升级已完成，当前 `✅ 已完成` 状态。
-- **Phase 4b（全消息 fork + transcript backfill）**：Path A 上线、用户反馈"想从 assistant 消息分叉"强烈后再启动。
-- **Phase 7b-future（多 defer UI）**：仅在 `multi-defer-poc` 显示 SDK 支持并发 defer 时解锁。
-
-### 建议发版节奏
-
-- **v{next+1}** = 本次 SDK 升级基础 + 阶段 1（chip 按钮 + 限流 UI）
-- **v{next+2}** = 阶段 3.1（PostCompact + CwdChanged + PermissionDenied）
-- **v{next+3}** = 阶段 3.2（Session fork） —— 带 DB migration 要 release note 特别标注
-- 后续按用户反馈和团队容量排
-
-每一步都保持独立可发版、可回滚（flag 或单列 Phase），不堆大版本。
 
 ## 采纳策略（双层设计）
 
@@ -137,10 +64,9 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 
 | Phase | 能力 | 性质 | 状态 |
 |-------|------|------|------|
-| Phase 1 | `TerminalReason` 附加到结束态 + Sentry tag | 附加 | ✅ 已完成（随本次 SDK 升级上线） |
-| **Phase 1b** | **chip 可操作按钮（压缩并重试 / 切 Sonnet / 开启 1M / 继续 / ...）** | **闭环** | **📋 待开始（路线图阶段 1）** |
-| Phase 2 | `SDKRateLimitInfo` 仅用于订阅路径的 UI 增强 | 附加 | 📋 待开始（路线图阶段 1） |
-| Phase 2b | 升级后的 SDK 类型适配（`Query` / `Options` / `ModelInfo`） | 兼容 | ✅ 已完成（随本次 SDK 升级上线） |
+| Phase 1 | `TerminalReason` 附加到结束态 + Sentry tag | 附加 | 📋 待开始 |
+| Phase 2 | `SDKRateLimitInfo` 仅用于订阅路径的 UI 增强 | 附加 | 📋 待开始 |
+| Phase 2b | 升级后的 SDK 类型适配（`Query` / `Options` / `ModelInfo`） | 兼容 | 📋 待开始 |
 
 ### Layer B — 高风险重设计（每块先 POC）
 
@@ -328,119 +254,6 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 - `prompt_too_long` chip 的所有「重试」按钮都走**二次确认对话框**，上一条 user message 在任何场景下都保留为 draft，不发生自动 replay
 
 **风险：** 低 — 纯附加层
-
----
-
-### Phase 1b — `TerminalReason` chip **可操作按钮**（闭环 Phase 1）
-
-**前提：** Phase 1 已完成（chip 展示 + i18n + Sentry tag 已上线）。
-
-**👤 用户今天的痛点：** Phase 1 的 chip 只是告诉你"为什么停下来"（如"上下文已满"），但**无法一键解决**。用户看到红 chip 后要：
-1. 自己去右上角找"压缩历史"按钮 → 点 → 等压缩 → 手动重发上一条
-2. 或者去 Settings 打开 1M context → 回 chat → 重发
-3. 或者从模型选择器切到 Sonnet → 重发
-
-链路长、容易中断。正是"看到 chip 也只能将就"的典型。
-
-**🎨 改动后 UI 长什么样：**
-
-按 `terminal_reason` 决定出哪些按钮（按钮挂在 chip 同行右侧）：
-
-| reason | 按钮组 | 副作用 |
-|--------|-------|--------|
-| `prompt_too_long` | `压缩并重试` · `开启 1M 并重试` · `仅压缩` | 重试动作都经二次确认 |
-| `blocking_limit` / `rapid_refill_breaker` | `切换到 Sonnet` · `查看额度详情` | 切模型经二次确认 |
-| `max_turns` | `继续` | 直接发送 `continue` prompt，无需确认 |
-| `hook_stopped` / `stop_hook_prevented` | `查看 Hook 配置` | 跳转 Settings → Hooks |
-| `tool_deferred` | （留给 Phase 7b 的 deferred-tool 响应卡片接管） | — |
-| `image_error` | `重新上传` | 清空当前图片 + focus 上传 |
-| `model_error` | `重试` | 二次确认后直接重发上一条 |
-| 其他 / `unknown` | 无按钮（chip 只展示） | — |
-
-**二次确认对话框模板**（所有"重试"类按钮共用）：
-```
-┌──────────────────────────────────────────────┐
-│ 确认操作                                       │
-│                                              │
-│ 将{动作描述}并重发上一条消息。                   │
-│ 如果上一轮已有工具副作用，重发可能重复执行。       │
-│                                              │
-│ [取消]              [确认]                    │
-└──────────────────────────────────────────────┘
-```
-
-用户取消 → 上一条 user message 保存为输入框 **draft**，用户自行决定（发送 / 编辑 / 放弃）。
-
-**🔁 交互脚本（`prompt_too_long` 最复杂路径）：**
-
-1. 长对话第 50 条消息，模型返回一半戛然而止
-2. 出现 🔴 `上下文已满` chip + `[压缩并重试]` `[开启 1M 并重试]` `[仅压缩]` 三个按钮
-3. 用户点 `压缩并重试`
-4. 弹二次确认对话框
-5. 用户点 `确认`
-6. chip 变为 ⏳ `正在压缩...`，compressor 运行（复用 Phase 6 的 PostCompact 分隔条显示进度）
-7. 压缩完成 → 自动重发上一条 user message
-8. 新响应开始流式输出
-
-**替代路径：** 用户点 `仅压缩` → 跳过二次确认直接压缩（因为没 replay 风险）→ 上一条消息保留为 draft → 用户自己决定下一步。
-
-**🔎 发现路径：** chip 本身被动触发（Phase 1 已加），按钮天然在用户视线焦点（刚结束的消息下方）。**无需 onboarding**。
-
-**改动清单：**
-
-1. **`TerminalReasonChip.tsx` 扩展**
-   - 当前只渲染 label，加 `actions?: ActionButton[]` 字段
-   - 每个 reason 在常量表里映射到对应的 action 列表
-   - 按钮点击触发 `onActionClick(actionId)` 回调上传到 ChatView
-
-2. **`ChatView.tsx` 挂载 action handler**
-   - 新建 `handleTerminalAction(actionId)` 集中分发：
-     - `compress_and_retry` → 调 compressor + 二次确认 + draft 保留 + replay
-     - `enable_1m_and_retry` → 打开 context1m + 二次确认 + replay
-     - `compress_only` → 压缩不重发
-     - `switch_to_sonnet` → `setCurrentModel('sonnet')` + 二次确认 + replay
-     - `continue_max_turns` → 直接发 "continue" 作为新 prompt
-     - `open_hook_settings` → `router.push('/settings#hooks')`
-     - `retry_image_upload` → 清空 attachments + focus file picker
-     - `retry_simple` → 二次确认 + replay
-
-3. **二次确认组件**
-   - 复用现有 `ConfirmDialog`（Phase 2 限流恢复面板也会用）
-   - 动态文案按 action 分路
-
-4. **Draft 保留**
-   - 用户取消任何重试动作时，把上一条 user message content 写入 `MessageInput` 的 textarea（覆盖或追加？按现有 draft 行为）
-   - 如果输入框已有未发送内容，弹小对话框"保留当前草稿 / 替换为上一条"
-
-5. **i18n**
-   - 按钮文案、二次确认文案、所有 action 的具体动词（中英各约 20 条）
-   - 文件：`src/i18n/zh.ts` + `en.ts`，key 前缀 `terminalAction.*`
-
-6. **单测**
-   - TerminalReasonChip render 每种 reason 下的按钮组合
-   - handleTerminalAction 对每个 actionId 的分支（用 mock 函数验证子系统被调）
-
-**改动文件预估：**
-- `src/components/chat/TerminalReasonChip.tsx` — 扩展 ~50 行
-- `src/components/chat/ChatView.tsx` — 新增 handler ~80 行
-- `src/components/ui/ConfirmDialog.tsx` — 可能已存在；若无新建 ~30 行
-- `src/i18n/zh.ts` + `en.ts` — 各 ~20 条
-- `src/__tests__/unit/terminal-reason-chip.test.tsx` — 新建
-
-**验收标准：**
-- 7 种有 action 的 terminal_reason 下按钮都能点、都能跑通
-- 每个"重试"类按钮都弹二次确认，取消后上一条消息保留为 draft
-- `compress_only` / `continue` / `open_hook_settings` 不弹二次确认（非破坏性）
-- 输入框里的用户 draft 不被任何 action 无警告覆盖
-- 单测覆盖所有 action 分支
-
-**风险：** 中
-- 每个按钮都要接一个子系统（compressor / context1m toggle / model switch / router）
-- 每个子系统的错误路径（压缩失败、1M 切换失败、切模型失败）要有对应降级
-- Draft 保留策略需要与现有 MessageInput 的 autosave 协同
-- 中等工作量（预计 2-3 天）
-
-**用户价值形态：** A（显性 UI，高价值）。
 
 ---
 
