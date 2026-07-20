@@ -1,0 +1,91 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/op7418/CodePilot.git
+
+      - name: Fetch upstream
+        run: git fetch upstream
+
+      - name: Check for upstream updates
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          echo "upstream_sha=$UPSTREAM_SHA"
+
+          # 检查上游 HEAD 是否已经在本地历史中
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD 2>/dev/null; then
+            echo "Already up to date with upstream"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          else
+            UPSTREAM_VERSION=$(git show upstream/main:package.json | grep '"version"' | sed 's/.*"version": *"\([^"]*\)".*/\1/')
+            echo "New upstream changes detected (version: $UPSTREAM_VERSION)"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Reset to upstream and preserve fork files
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          # 保存 fork 独有/定制的文件
+          mkdir -p /tmp/fork-backup/.github/workflows
+          cp .github/workflows/sync-upstream.yml /tmp/fork-backup/.github/workflows/
+          cp .github/workflows/build.yml /tmp/fork-backup/.github/workflows/
+          if [ -d docs ]; then
+            cp -r docs /tmp/fork-backup/docs
+          fi
+
+          # 重置到上游
+          git checkout main
+          git reset --hard upstream/main
+
+          # 恢复 fork 独有/定制的文件
+          cp /tmp/fork-backup/.github/workflows/sync-upstream.yml .github/workflows/
+          cp /tmp/fork-backup/.github/workflows/build.yml .github/workflows/
+          if [ -d /tmp/fork-backup/docs ]; then
+            mkdir -p docs
+            cp -r /tmp/fork-backup/docs/* docs/
+          fi
+
+          # 提交 fork 独有文件
+          git add .github/workflows/ docs/
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: preserve fork-specific files after upstream sync"
+          fi
+
+      - name: Push changes
+        if: steps.check.outputs.has_updates == 'true'
+        run: git push origin main --force
+
+      - name: Create and push version tag
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          VERSION=${{ steps.check.outputs.version }}
+          # 删除旧的同版本 tag（如果存在）
+          git push origin :refs/tags/v${VERSION} 2>/dev/null || true
+          git tag -f "v${VERSION}"
+          git push origin "v${VERSION}"
+          echo "Synced to upstream and pushed tag: v${VERSION}"
