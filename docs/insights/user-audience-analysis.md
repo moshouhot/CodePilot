@@ -219,53 +219,17 @@ CodePilot 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显�
 2. **多服务商** — 17+ provider 开箱即用
 3. **独特能力** — 远程 Bridge、生成式 UI、助理工作区
 
-### 服务商适配问题归因（架构审查后修正）
-
-> 技术细节见 [docs/handover/provider-architecture.md](../handover/provider-architecture.md)
-
-原始数据显示 100+ 个 Issue 与服务商适配相关。经源码审查和官方文档对照，问题**并非全部是 CodePilot 的责任**，归因为三类：
-
-#### 1/3 — CodePilot preset 配置错误（我们的锅）
-
-- 5 个高频服务商（OpenRouter、智谱 GLM x2、Moonshot、Kimi）的 `authStyle` 与官方文档要求不一致，导致环境变量注入方式错误，表现为 401/400
-- ~~未设置 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`，导致用户终端 `~/.claude/settings.json` 中的配置覆盖 CodePilot 注入的 provider~~（**2026-04-15 修复**：该变量在 SDK 0.2.62 中从未被识别；现通过 `src/lib/claude-home-shadow.ts` 实现真正隔离——DB provider 请求时建剥离 ANTHROPIC_* 的临时 `~/.claude/`）
-- **解法**：修代码——改 preset authStyle + per-request shadow HOME 隔离 provider 凭据归属
-
-#### 1/3 — 用户对 CodePilot 与 Claude Code 关系的误解（认知问题）
-
-- 用户以为在终端 `~/.claude/settings.json` 里配了环境变量，CodePilot 就能直接用
-- 实际上 CodePilot 有独立的 Provider 系统，和终端 Claude Code 是两套配置
-- 用户不理解为什么终端好使但 CodePilot 不好使
-- **解法**：改引导——在配置页面明确告知"请在此重新配置服务商，与终端 Claude Code 配置无关"
-
-#### 1/3 — 用户在服务商侧操作错误（服务商的锅 + 用户操作）
-
-- Coding Plan 页面有多个 API Key 入口，用户拿了错的 Key（比如百炼的普通 DashScope Key 而非 sk-sp-xxx 的 Coding Plan Key）
-- 买了按量付费但填到了 Coding Plan 入口，或反过来
-- 火山引擎没先激活 endpoint 就填 Key
-- **解法**：加验证+跳转——配置向导里直接放"去这里获取 Key"的链接（指到正确页面），配完后立即测试连通性
-
-### 执行项状态
+### 四个待解决的执行项
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
 | README 重构 | **已完成** | 定位、badges、下载前置、服务商表格、Agent 叙事 |
-| 服务商架构文档 | **已完成** | 18 服务商对照、Claude Code 源码分析、preset 错配识别 → [handover/provider-architecture.md](../handover/provider-architecture.md) |
-| preset authStyle 修正 | **已完成** | 6 个 preset 对齐官方文档 + Zod Schema 防护 + 61 个回归测试 |
-| ~~`PROVIDER_MANAGED_BY_HOST` 接入~~ → per-request shadow HOME | **已修复（2026-04-15）** | 核查 SDK 0.2.62 死代码已删；改用 `src/lib/claude-home-shadow.ts` 在 DB provider 请求里建剥离 ANTHROPIC_* 的临时 `~/.claude/`，user-level MCP/plugins/hooks 全部保留 |
-| api_key 模式不再双注入 | **已完成** | api_key 只设 ANTHROPIC_API_KEY，不再设 AUTH_TOKEN |
-| 配置时连通性验证 | **已完成** | POST /api/providers/test + 前端测试按钮 + 带 preset 默认模型 |
-| 配置引导优化 | **已完成** | meta 面板（API Key 链接 + 计费标签 + 注意事项 + CodePilot 文档链接） |
-| 错误恢复动作 | **已完成** | RecoveryAction 后端 + SSE + 前端渲染（URL 链接 + 应用内导航） |
-| QUICK_PRESETS 去重 | **已完成** | 从 VENDOR_PRESETS 自动生成，-181 行，单一数据源 |
-| authStyle 单一真相源 | **已完成** | ProviderManager badge + Doctor + PresetConnectDialog 均从 preset catalog 读取 |
-| 模型 CRUD API | **已完成** | GET/POST/DELETE /api/providers/[id]/models |
-| 官网 providers 文档更新 | **已完成** | 国内服务商表格修正 + 注意事项 + 小米 MiMo |
+| 服务商架构文档 | **待启动** | 需要创始人提供各服务商配置页面资料后，梳理完整架构和动态数据更新机制 |
 | 轻量级匿名报错 | **待启动** | 方案：接入 Sentry 免费版（5,000 错误/月），覆盖 Electron + Next.js 双层 |
-| 细分错误模式 | **待启动** | billing_required、endpoint_not_activated、tool_search_error 等待补充 |
+| 服务商配置向导化 | **待启动** | 配置预设模板 + 连通性测试 + 分步引导，降低小白用户配置失败率 |
 
 ### 项目背景补充
 
 - 项目由单人创始人独立运营，全部开发通过 AI 协助完成（Vibe Coding），创始人不直接编写代码
 - 功能层面已基本堆叠完毕，当前阶段重点是细节打磨、稳定性提升和品牌重塑
-- 服务商模块已完成系统级治理（6 Phase 全部完成）——后续改动应参照 [handover/provider-architecture.md](../handover/provider-architecture.md) 和 [exec-plans/completed/provider-governance.md](../exec-plans/completed/provider-governance.md)
+- 服务商模块是改动风险最高的区域——架构文档缺失导致每次改动容易引发回归
