@@ -6,7 +6,6 @@
 
 - **Add Service 成功 / 单服务商刷新 / 刷新全部**：自动 probe + apply，无 dialog；保护层是 `applyDiscoveryDiff` 拒绝翻动 `enable_source IN ('manual_enabled','manual_hidden')` 或 `user_edited=1` 的行
 - **按推荐整理 (`alignEnabledWithCatalog`) / 高级 diff 对话框**：preview-first，dryRun 显示影响范围后才写入；保留给会主动翻动多行或做删除的"扫荡"操作
-- **套餐目录升级 (`mergeCatalogManagedModels`)**：Settings > Models 读取 catalog-only plan 时，只更新 pristine `source='catalog'` 行的当前 metadata/order 并补缺失 catalog id；不改 manual/user-edited/manual-hidden，不 disable/prune，因此不等同于全量 align。补行前同时按 stable id 与 upstream wire id 去重；写入使用冲突安全的条件 INSERT，目录排序绕开用户行占用的 slot
 
 **演进路径**：第一版纯只读 spike → 第二版无差别 upsert（已淘汰，会回滚用户编辑）→ Phase A "diff-first 必须人确认"（保护放在 UI 步骤，但日常刷新太重）→ **Phase B 当前版**（保护下沉到数据层，UI 可以静默 apply）。详见 `docs/research/provider-model-discovery.md` §"演进历史"。
 
@@ -121,16 +120,11 @@ const applicable = diff.filter(e =>
 | 来源 | 原因 | Fallback |
 |---|---|---|
 | OpenAI OAuth | 浏览器 web session，不暴露 OAuth 端点 | SDK 内置 default |
-| xAI OAuth | 上游已有 authenticated Build proxy `/v1/models`，但 CodePilot 当前尚未接入所需 session headers、parser/cache 与 entitlement 失败语义 | 当前仍以 `grok-4.6` + `grok-4.5` legacy 静态 catalog fail-closed；它不是账号完整目录。接入后走 virtual-provider 专用刷新，不复用 DB provider 通用 probe |
 | Claude Code env | 环境变量驱动，模型由 SDK 内置定义 | SDK / catalog 内置 default |
-| `bailian` / `qwen-token-plan-personal-cn` / `bailian-token-plan-cn` | 套餐白名单来自官方产品页；共享 endpoint 不能用于识别个人/团队套餐 | 各自精确 catalog，`modelDiscoveryMode='catalog_only'` |
-| `xai` API Key | 只暴露经过真实 Responses SDK wire 验证的内置模型/effort，不把 `/models` 返回的全部 SKU 自动暴露 | 内置 `grok-4.6` + `grok-4.5` legacy catalog；`@ai-sdk/xai@4.0.18` 尚不接受 `xhigh`，修复前不得对用户承诺该档 |
 | `gemini-image` / `openai-image` | 上游 /v1/models 返回全部模型（含 text/audio/embedding），无法 filter 出图片 | catalog 内置图片列表 |
 | 没匹配上预设、用户自填 base_url 的 custom 行 | 没有协议线索 | catalog + 手动 `provider_models` 表 |
 
 **不变量**：Class C 的入口**不展示** "刷新模型" 按钮（图片 provider 已在 `ProviderManager.tsx:744` 注释明确不渲染 onRefreshModels）。
-
-套餐型 provider 的 `preset_key` 是目录选择的事实源。Qwen Token Plan 个人版/团队版共享 `https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic`；缺失 identity 的旧行必须显示“请选择套餐类型”，不能用 URL 命中第一个 catalog。2026-07-21 主动核对的精确白名单记录在 `docs/research/qwen-token-plan-grok-oauth-2026-07-21.md` 与 `docs/research/provider-model-discovery.md`。
 
 ## 4. 安全约束
 
@@ -140,8 +134,6 @@ const applicable = diff.filter(e =>
 | 响应里**不回显** key | `model-discovery.ts:probeGemini` 把 `?key=***` 占位符替换 endpoint 字段 | 防日志泄漏 |
 | 所有 fetch 用 `AbortSignal.timeout(8000)` | `model-discovery.ts:fetchAndParse` | 防慢上游 hang 住请求 |
 | 任何不确定 endpoint 标 `experimental` 而非 `api` | `classifyProvider` | 不强行宣称能力 |
-| catalog-only provider 不发 discovery probe | `isCatalogOnlyDiscoveryProvider()` + routes/UI | 避免套餐目录被通用 `/models` 污染或把不属于套餐的 SKU 暴露给用户 |
-| 共享 URL 必须先解析稳定 identity | `resolveProviderPresetIdentity()` | 防止个人/团队目录串线 |
 
 `SAMPLE_CAP = 500` (`model-discovery.ts:86`)：覆盖目前所有真实 provider；超出截断。OpenRouter ~200，Aiberm ~131，最大见过 ~131。如未来某 provider 返回 1000+，加该常数（不要去掉）。
 
@@ -176,7 +168,6 @@ availableModels = [
 | Apply route | `src/app/api/providers/[id]/discover-models/apply/route.ts` | 唯一写入入口；保留 user_edited；orphan 不动 |
 | Diff apply DB op | `src/lib/db.ts` `applyDiscoveryDiff()` | 五种 case 分明；user_edited / hidden 守护 |
 | Align with catalog | `/api/providers/[id]/models/align-enabled` + `db.alignModelsWithCatalog()` | preview-first；apply 保留 user_edited；不删 manual |
-| Catalog-only plan read merge | `/api/providers/[id]/models` GET + `db.mergeCatalogManagedModels()` | 只升级 pristine catalog 行并补当前 id；不改用户行，不 disable/prune；stable/upstream 任一已存在都不补重复 SKU，并发 INSERT 输家采用已有行 |
 | Refresh diff Dialog | `ProviderManager.tsx` `handleApplyDiff` | 仅发 actionable diff（new/update/preserve/hidden-up），跳 unchanged/orphan |
 | Models page row badges | `ModelsSection.tsx` source badge | source 5 态 tone 锁定 |
 | Catalog | `provider-catalog.ts:VENDOR_PRESETS` `defaultModels` | seed 模型来源 |
@@ -198,13 +189,7 @@ availableModels = [
   - **不要**让 enabled=0 行被自动 enabled=1
 - 加 / 改 catalog `defaultModels`：
   - `seedCatalogModels` 路径会种这些 ID（仅当 provider 无任何 row 时）
-  - catalog-only plan 已 seed 过的 provider 会在 Models 页读取时通过 `mergeCatalogManagedModels` 补当前 catalog id，并刷新 pristine catalog metadata；其它 provider 仍不自动扩写
-  - Add Model 候选必须区分 `未添加 / 已添加且启用 / 已添加但隐藏`。隐藏候选提供“重新启用”动作并 PATCH 真实 existing local id，不能只显示无操作的“已添加”
-  - catalog-only plan 的精确 catalog 候选重新添加时，POST 服务端必须从当前 catalog 重建 display/upstream/capabilities/source/order；不得让 renderer 把它写成 `source='manual' + capabilities='{}'`
-  - 删除不是“退出 catalog”的语义：catalog-only plan 的当前目录项若被物理删除，下一次 Models GET 会重新物化。用户只想不在 picker 使用时必须选择“隐藏”
-  - 自动 read merge 绝不能复用完整 `alignEnabledWithCatalog`：后者会 disable/prune，必须继续 preview-first
-  - 套餐/白名单型 provider 必须记录官方来源、核对日期与精确大小写；不得从普通 `/models` 猜套餐可用性
-  - 同 endpoint 多 preset 必须补 identity/ambiguous 测试
+  - 已 seed 过的 provider 后续不会自动接入新 catalog 模型；用户手动 `align with catalog` 才合并
 
 ## 8. 常见坑
 
@@ -219,20 +204,14 @@ availableModels = [
 9. **Apply 没过 filter** — 把 orphan 也发到 apply route 可能误删；`unchanged` 现在 OK 发（让 `last_refreshed_at` 推进），但 `orphan` 永远不发。
 10. **OAuth provider 误展示 refresh 按钮** — OAuth 没 DB row，refresh 无意义且会 404。`ProviderCard` 仅当 `onRefreshModels` 传入才渲染按钮，OAuth 路径不传。
 11. **批量驱动忘了 try/catch/finally** — `刷新全部` 必须 try/finally 保护 `setRefreshingAll(false)`，否则单个 throw 让按钮永久卡 loading。`auto-discover-models.ts` 的 `probeAndApplyProvider` 是纯结果版本，专门给批量驱动用以便外层独占 toast。
-12. **用共享 URL 猜 Token Plan 套餐** — 个人/团队命中同 endpoint；URL first-match 会静默换目录。必须使用持久化 `preset_key`，legacy ambiguous 要用户确认。
-13. **把 xAI OAuth 静态目录冒充账号目录** — 上游 Build proxy 已有 authenticated `/v1/models`，但它需要 session header 合同和独立 virtual-provider 接线。未实现前只能把静态值标为 fallback；实现后也不能复用要求 DB row 的通用 `/discover-models` route。
 
 ## 9. 测试覆盖
 
 | 测试文件 | 覆盖 |
 |---|---|
-| `catalog-only-discovery.test.ts` / `coding-plan-discovery-gate.test.ts` | 套餐型/xAI catalog-only gate，不发通用 discovery |
+| 待补 `model-discovery.test.ts` | classifyProvider 各分支；probe 函数 mock 上游 |
 | 待补 `apply-discovery-diff.test.ts` | 五种 DiffEntryStatus 写库行为；user_edited / hidden 保留 |
 | `provider-resolver.test.ts` 内 `buildResolution` 系列 | catalog merge / DB 优先 / hidden 抑制 |
-| `foundation-refresh-user-path-contract.test.ts` U3 | 存量 GLM-5.2 catalog 快照在 Models GET 后持久升级为 5.3/Turbo/4.7；Add Model stable/wire id 分离；隐藏候选可恢复；目录重加保留能力；重复 GET 零写；非 plan gate 反例 |
-| `catalog-capabilities-roundtrip.test.ts` | catalog metadata round-trip、read merge 用户保护；upstream 去重、单旗标保护、capabilities COALESCE、排序避让与 INSERT 冲突赢家 |
-| `qwen-token-plan-catalog.test.ts` | 三种 Qwen 套餐精确目录与默认角色 |
-| `provider-preset-identity-migration.test.ts` | 共享 URL identity、legacy ambiguous 与保守迁移 |
 
 加新 probe protocol / 改 apply 行为时，至少补对应单测；目前缺 model-discovery 的端到端 test，用真实 fetch mock 库（`undici` mock 或 `nock`）做。
 
@@ -244,9 +223,3 @@ availableModels = [
 - **首次刷新对旧自动写入数据**：第二版自动写入留下的行 source='manual'，第一次走新 flow 会被识别为 user_edited=0 + 'will-update'，apply 后变 'unchanged'。**这是一次性现象**，不是 bug
 - **Capability 自动识别 V1 不做** — 现在 `capabilities_json` 始终 `{}`，UI 不展示也不让编辑；下一阶段补
 - **图片 provider 不支持 refresh** — 上游 /v1/models 混合返回 text/audio/embedding，无法机器筛出图片模型；catalog 内置列表是事实来源
-- **2026-07-21 Qwen/xAI catalog-only** — Qwen Coding/Token Plan 用官方套餐白名单，xAI 首版只暴露已验证的 `grok-4.5` Responses；通用 model-list 不能证明套餐/产品可用性。
-- **2026-07-21 preset identity** — 同 URL 多套餐由 `api_providers.preset_key` 决定目录；legacy 歧义不再 first-match。
-- **2026-08-14 Grok 4.6 review blocker** — `grok-4.6`/`grok-4.5` 继续使用内置 catalog，不改为通用 discovery；能力暴露必须同时通过生产 builder 与锁定 SDK 的真实 wire 测试。当前 `@ai-sdk/xai@4.0.18` 会在发网前拒绝 `xhigh`，因此 XHigh 不得仅凭模型文档或 helper 测试进入可选目录。
-- **2026-08-14 xAI OAuth 专用 model-list** — Grok Build 上游源码确认 session auth 会请求 proxy authenticated `/v1/models`。CodePilot 当前行为仍归 Class C，因为 virtual provider 无 DB row 且尚未实现专用 parser/cache/UI；后续应增加 virtual-provider refresh，而不是把 bearer 塞进通用 discovery。
-- **2026-08-15 GLM-5.3 存量目录热修** — v0.67.0 的 Runtime read-through 能把 pristine `sonnet/GLM-5.2` 临时解释为 5.3，但 Models GET 仍展示原始 DB，Add Model 又按稳定 alias 判成“已添加”。catalog-only plan 的 Models GET 现执行非破坏 merge：更新 pristine catalog metadata、补缺失 id，永不 disable/prune；搜索候选同时拆分 stable local id 与 upstream wire id，避免点击添加制造重复行。
-- **2026-08-16 v0.67.1 review 收口** — 条件审查发现并发 INSERT、同 upstream 双行、hidden 候选死路、catalog 重加降级 manual 四类缺口。merge 改为 stable/upstream 双查重 + 条件 `INSERT OR IGNORE` + 用户排序避让；候选暴露 hidden/local-id 三态并可 PATCH 恢复；精确 plan catalog POST 由服务端目录重建完整 metadata。历史上已经存在的 user-owned 双行不自动删改，避免破坏 session pin/用户所有权；后续如需清理必须 preview-first。
