@@ -27,7 +27,7 @@
 | UP-10 | installer、`latest*.yml`、blockmap、checksum/attestation 必须来自同一 immutable output，经 central audit 后一次发布。mac metadata 只引用 ZIP；后置 staple 的 DMG 只作手工 bootstrap，不进入 updater graph。发布后不改 metadata、不复用版本/tag；恢复只发更高 patch。 |
 | UP-11 | `quitAndInstall()` 只是安装 handoff 请求，不是成功终态。Main 在 `before-quit-for-update` 前临时放行 close-to-hide；若同步抛错、updater error 或 15 秒内进程未进入真实 `before-quit` teardown，必须撤销 `isQuitting`、恢复窗口/托盘并回到 downloaded + `install_failed`，允许用户重试。 |
 | UP-12 | chat 活动事实必须同时存在 active `runtime_status`（`running` / `streaming` / `waiting_permission`）与未过期 session lock；尤其不能漏掉正在输出 token 的 `streaming`。崩溃留下的裸 status/过期 owner 不得永久卡安装。一次只读 activity snapshot 不是跨请求原子准入栅栏；在 chat/bridge/task 共用带租约 fence 前，不得宣称“检查后绝无新任务启动”，残余竞态由 tech-debt #88 跟踪。 |
-| UP-13 | stable GitHub Release 同时发布三平台安装包，但只发布 macOS updater graph。Windows/Linux 必须使用 `CODEPILOT_OFFICIAL_UPDATE_BUILD=0`，只允许手动安装包/checksum/attestation，不得出现对应 updater metadata/blockmap；preview Release 仍为 macOS-only。重新开启 Windows auto-update 需要用户明确启用 signer 与真实升级门禁。 |
+| UP-13 | 当前 stable/preview GitHub Release 只发布 macOS updater graph。Windows/Linux 手工 artifact job 必须使用 `CODEPILOT_OFFICIAL_UPDATE_BUILD=0`，不得上传到 tag/prerelease；Windows 手工 job 仍要求签名三件套，缺失时 fail closed。重新开启 Windows auto-update 需要用户明确启用 signer 与 Release gate。 |
 
 ## 3. 关键文件 + 责任
 
@@ -49,7 +49,7 @@
 - [ ] raw URL、缓存路径、installer 命令、SDK error 是否都未进入日志/Sentry/IPC？
 - [ ] native 失败时 Settings 与 GitHub fallback 是否仍可用？最新 Release 没有当前平台资产时，是否展示 `platformAssetMissing` 而非假下载 CTA？
 - [ ] dependency 是否 exact pin；metadata/blockmap/signature verifier 是否先于开启安装？
-- [ ] stable 是否包含三平台安装包但只有 Mac metadata/blockmap；Windows/Linux 是否关闭 official provenance，preview 是否仍拒绝所有非 Mac 资产？
+- [ ] 发布平台是否与当前授权一致；Mac-only 时 verifier 是否拒绝 Windows/Linux 资产，手工 job 是否关闭 official provenance？
 - [ ] targeted + full + build + packaged RC-A→RC-B clean-machine smoke 是否登记？
 
 ## 5. 常见坑
@@ -68,7 +68,7 @@
 - `updater-contract.test.ts`：平台/channel、错误分类、退避、Main-owned IPC、平台缺资产 UI 与下载中检查按钮 source contract。
 - `updater-contract.test.ts`：同时钉住 downloading check 互斥、install handoff latch 回滚、无更新时清空旧 snapshot 字段，以及 `running` / `streaming` + live owner 会阻断安装、stale runtime_status 不冒充 live owner。
 - `electron-packaging-hygiene.test.ts`：真实 Main→utilityProcess→SQLite package gate。
-- 发布资产合同测试：stable 要求 macOS metadata/blockmap 与三平台 installer/checksum 的 central audit；混入 Windows/Linux updater metadata/blockmap 必须失败，preview 混入任一非 Mac 资产必须失败。
+- 发布资产合同测试：macOS metadata/blockmap/installer/checksum 的上传与 central audit；混入 Windows/Linux 资产必须失败。
 - 真实 smoke：0.67.1→RC-A 手动 bootstrap；RC-A→RC-B native update，macOS arm64/x64 与 Windows x64。
 
 ## 7. 设计决策日志
@@ -83,4 +83,3 @@
 - 2026-08-24：复审发现 active status 枚举漏掉 Runtime 真实写入的 `streaming`，会把正在输出的会话误判为 idle；补齐 `running` / `streaming` / `waiting_permission` 三态与 live-lease 行为反例。
 - 2026-08-24：用户决定本轮只发布 macOS 自动更新；stable/preview Release 收窄为 Mac updater graph，Windows/Linux 只保留 official provenance 关闭的手工构建入口。
 - 2026-08-24：macOS-only 发布后，Windows/Linux 仍可发现新版本，但 API/UI 必须明确该版本没有对应平台安装包；Release 详情页不能冒充推荐下载。下载、已下载或安装阶段的检查按钮显示“更新进行中”并禁用，避免无反馈的重复检查。
-- 2026-08-24：用户澄清目标是“Mac 自动更新 + Windows/Linux 手动包”，不是 Mac-only 分发。stable 同一 Release 恢复三平台安装包，API 继续按真实 platform/arch 选直链；只有 Mac 包带 official provenance 并消费 `latest-mac.yml`，Windows/Linux 不发布 updater feed。
