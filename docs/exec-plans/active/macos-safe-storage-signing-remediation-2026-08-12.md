@@ -11,7 +11,7 @@
 | Phase 1 | Developer ID + Team ID fail-closed 发布门禁 | ✅ Code complete | stable/preview 都要求证书，最终 `.app` 再做 deep/strict 校验 |
 | Phase 2 | 本地 recovery smoke 的 Safe Storage 隔离 | ✅ Code complete | 仅 exact env + packaged + canonical temp userData 可跳过，flag 不下传 child |
 | Phase 3 | 自动回归、构建与本地 packaged smoke | ✅ 已完成 | 5192/0/1；build/package/签名/0-map/health；single/budget/blocked 全通过 |
-| Phase 4 | official-signed CI / 旧 ad-hoc 用户升级验收 | 🟡 CI 已完成 / 用户迁移待验 | v0.66.2 official-signed gate、Release 与 12 assets 已通过；旧钥匙串 ACL 首次迁移可能仍需一次授权 |
+| Phase 4 | official-signed CI / 旧 ad-hoc 用户升级验收 | ⏳ 修正后重跑 | v0.66.1 CI 证明证书已导入但身份选择被关闭；workflow 已修正，待 v0.66.2 official-signed gate；旧钥匙串 ACL 首次迁移可能仍需一次授权 |
 
 ## 用户结果
 
@@ -60,7 +60,7 @@
 | 2026-08-12 | Node | n/a | signing/startup policy + workflow source contract | ✅ targeted | 43/43；symlink hardening 追加 4/4 |
 | 2026-08-12 | local Electron 40.10.6 arm64 | ad-hoc（显式、隔离） | build/package/deep-strict/0-map/health + recovery single/budget/blocked | ✅ 本地 smoke | health 200；single `66660→66668`；budget 第四次停止；blocked 拒绝 relaunch、plain quit 成功；无 Keychain modal。正式 gate 对该 ad-hoc 包按预期退出 1 |
 | 2026-08-13 | GitHub Actions macOS | 证书已导入、身份发现被关闭 | v0.66.1 stable final artifact gate | ✅ 按预期阻断 | run `31615349470`：electron-builder 跳过签名，afterSign 拒绝 ad-hoc；未创建 Release |
-| 2026-08-13 | GitHub Actions macOS | Developer ID + configured Team ID | v0.66.2 stable final artifact gate | ✅ official-signed CI | run [`31616811316`](https://github.com/op7418/CodePilot/actions/runs/31616811316)：arm64+x64 package、exact Team ID/deep-strict、native ABI、packaged server、checksums 全通过；[Release v0.66.2](https://github.com/op7418/CodePilot/releases/tag/v0.66.2) 非 draft/非 prerelease，12 assets uploaded |
+| _待执行_ | GitHub Actions macOS | Developer ID + configured Team ID | v0.66.2 stable final artifact gate | ⏳ | 已修正 certificate-backed step 的 identity selection，待重跑 |
 | _待执行_ | affected Mac | 旧 ad-hoc → Developer ID | 首次授权与后续升级 | ⏳ | 允许首次迁移授权，不允许每版重复 |
 
 ## 决策日志
@@ -72,4 +72,3 @@
 - 2026-08-12：隔离 recovery smoke 三场通过，只证明 recovery 与 Safe Storage 隔离合同；它不替代 official-signed 包访问真实 userData/旧钥匙串 ACL 的发布验收。
 - 2026-08-12：只读 `gh secret list` 确认仓库已存在 `MAC_CERT_P12_BASE64`、`MAC_CERT_PASSWORD`、`APPLE_TEAM_ID`；workflow 必须映射现有名称，不能假设另有 `CSC_LINK` / `CSC_KEY_PASSWORD` secrets。
 - 2026-08-13：v0.66.1 official CI 证明导入 `CSC_LINK` 后仍需允许身份选择；保留失败 tag、不移动或重建，修正 workflow 后使用 v0.66.2 重发。
-- 2026-08-13：v0.66.2 stable CI 的 Developer ID 双架构签名与最终 bundle gate 全绿，Release 已发布。该证据关闭发布签名链门禁，但不替代旧 ad-hoc 用户机器首次升级和后续同 Team ID 版本不再弹窗的真实 ACL 验收。
