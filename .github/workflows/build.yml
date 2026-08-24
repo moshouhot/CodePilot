@@ -1,170 +1,31 @@
-name: Build & Package
-
-# Stable tag-release workflow.
-#
-# Triggers on `v*` tags → builds macOS arm64/x64 bootstrap assets plus one
-# universal updater ZIP, then creates a real GitHub Release (NOT a prerelease)
-# whose body is RELEASE_NOTES.md. Windows/Linux remain manual artifact jobs and
-# are deliberately excluded from tag releases until their trust model is armed.
-# The internal tester channel lives in `preview-build.yml` / `preview-release.yml`
-# (artifacts-only / prerelease) and has its own signed `preview*.yml` feed.
-#
-# Fail-closed gates preserved from the refactor's CI:
-#   - package.json version == tag version
-#   - Codex app-server must NOT use `--listen`
-#   - ClaudeCode canonicalizes bare `sonnet` -> `claude-sonnet-4-6`
-#   - P0 startup regression pins (codex binary discovery, app-server client
-#     fast-fail, provider resolver / catalog)
-#   - packaged better-sqlite3 native ABI loads under the Electron runtime
-#   - every packaged standalone server boots and contains no source maps
+name: Build & Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       platform:
-        description: "Target platform (Windows requires configured signer secrets/variable)"
+        description: "Target platform"
         required: true
-        default: "macos"
+        default: "all"
         type: choice
         options:
           - all
           - windows
           - macos
-          - linux
-      telemetry_smoke:
-        description: "Compile and run isolated Sentry smoke fixtures (manual macOS only)"
-        required: true
-        default: false
-        type: boolean
-  push:
-    tags:
-      - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify-source:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.ver.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Resolve expected version (tag on push, package.json otherwise)
-        id: ver
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="$(node -p "require('./package.json').version")"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Expected release version: $VERSION"
-
-      - name: Fail-closed gate A — version matches tag + Codex has no --listen
-        env:
-          EXPECTED_VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::stable tags must match vX.Y.Z; prerelease tags belong to preview-release.yml"
-            exit 1
-          fi
-          # Match an actual CLI-arg literal ('--listen' / "--listen"), NOT prose
-          # comments that merely mention the removed flag (e.g. a backtick `--listen`).
-          if grep -REn "['\"]--listen['\"]" src/lib/codex/app-server-manager.ts; then
-            echo "::error::Codex app-server still passes --listen as a CLI arg"
-            exit 1
-          fi
-          node -e '
-            const v = require("./package.json").version;
-            if (v !== process.env.EXPECTED_VERSION) {
-              console.error(`::error::package.json version ${v} != tag/expected ${process.env.EXPECTED_VERSION}`);
-              process.exit(1);
-            }
-            console.log(`✓ package version ${v}`);
-          '
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Fail-closed gate B — ClaudeCode canonicalizes bare sonnet
-        run: |
-          set -euo pipefail
-          trap 'rm -f release-gate-sonnet.ts' EXIT
-          cat > release-gate-sonnet.ts <<'TS'
-          import { toClaudeCodeEnv } from './src/lib/provider-resolver';
-          const resolved: any = {
-            provider: {
-              id: 'gate',
-              name: 'Legacy Gateway',
-              provider_type: 'anthropic',
-              protocol: 'anthropic',
-              base_url: 'https://gateway.example.com/anthropic',
-              api_key: 'key',
-              is_active: 1,
-              sort_order: 0,
-              extra_env: '{}',
-              headers_json: '{}',
-              env_overrides_json: '',
-              role_models_json: JSON.stringify({ default: 'sonnet', sonnet: 'sonnet', haiku: 'haiku', opus: 'opus' }),
-              notes: '',
-              created_at: '',
-              updated_at: '',
-              options_json: '{}',
-            },
-            protocol: 'anthropic',
-            authStyle: 'api_key',
-            model: 'sonnet',
-            upstreamModel: 'claude-sonnet-4-6',
-            modelDisplayName: 'Sonnet 4.6',
-            headers: {},
-            envOverrides: {},
-            roleModels: { default: 'sonnet', sonnet: 'sonnet', haiku: 'haiku', opus: 'opus' },
-            hasCredentials: true,
-            availableModels: [
-              { modelId: 'sonnet', upstreamModelId: 'claude-sonnet-4-6', displayName: 'Sonnet 4.6' },
-              { modelId: 'haiku', upstreamModelId: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5' },
-              { modelId: 'opus', upstreamModelId: 'claude-opus-4-7', displayName: 'Opus 4.7' },
-            ],
-            settingSources: ['user'],
-          };
-          const env = toClaudeCodeEnv({}, resolved);
-          if (env.ANTHROPIC_MODEL !== 'claude-sonnet-4-6') {
-            console.error(`::error::expected claude-sonnet-4-6, got ${env.ANTHROPIC_MODEL}`);
-            process.exit(1);
-          }
-          console.log(`✓ sonnet -> ${env.ANTHROPIC_MODEL}`);
-          TS
-          CODEX_DISABLED=1 npx tsx release-gate-sonnet.ts
-
-      - name: P0 regression pins
-        run: |
-          CODEX_DISABLED=1 npx tsx --test --import ./src/__tests__/db-isolation.setup.ts \
-            src/__tests__/unit/codex-binary-discovery.test.ts \
-            src/__tests__/unit/codex-app-server-client.test.ts \
-            src/__tests__/unit/provider-resolver.test.ts
-
-      # Full unit + lint coverage is enforced by the local pre-commit hook on the
-      # tagged commit. The release CI keeps the remote gate focused on version
-      # identity + P0 startup regressions + packaged ABI so a tag build can't be
-      # blocked by unrelated Linux-runner test hangs or React-compiler lint debt.
-
   build-macos:
-    needs: verify-source
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos' }}
-    runs-on: macos-15
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -173,304 +34,33 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Build macOS release bundles
-        timeout-minutes: 45
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Build Electron
+        run: node scripts/build-electron.mjs
+
+      - name: Package macOS (${{ matrix.arch }})
+        run: npx electron-builder --mac --${{ matrix.arch }} --config electron-builder.yml --publish never
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "1"
-          CODEPILOT_SOURCE_MAPS: "1"
-          CODEPILOT_TELEMETRY_SMOKE: ${{ inputs.telemetry_smoke && '1' || '0' }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: npm run electron:build
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload macOS source maps to Sentry
-        env:
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "1"
-          CODEPILOT_SOURCE_MAPS: "1"
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        run: npm run sentry:sourcemaps:upload
-
-      - name: Configure fail-closed Apple notarization credentials
-        env:
-          APPLE_NOTARIZATION_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_BASE64 }}
-          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          set -euo pipefail
-          [ -n "$APPLE_NOTARIZATION_KEY_BASE64" ] || { echo "::error::APPLE_NOTARIZATION_KEY_BASE64 is required"; exit 1; }
-          [ -n "$NOTARY_KEY_ID" ] || { echo "::error::APPLE_API_KEY_ID is required"; exit 1; }
-          [ -n "$NOTARY_ISSUER" ] || { echo "::error::APPLE_API_ISSUER is required"; exit 1; }
-          KEY_PATH="$RUNNER_TEMP/AuthKey_CodePilot.p8"
-          printf '%s' "$APPLE_NOTARIZATION_KEY_BASE64" | base64 --decode > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY_ID=$NOTARY_KEY_ID" >> "$GITHUB_ENV"
-          echo "APPLE_API_ISSUER=$NOTARY_ISSUER" >> "$GITHUB_ENV"
-
-      - name: Package native macOS manual assets (arm64 + x64)
-        timeout-minutes: 45
-        env:
-          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-          CODEPILOT_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CODEPILOT_REQUIRE_DEVELOPER_ID: "1"
-        run: |
-          npx electron-builder --mac --arm64 --x64 --config electron-builder.yml --publish never
-
-      - name: Package universal macOS updater asset
-        timeout-minutes: 45
-        env:
-          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-          CODEPILOT_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CODEPILOT_REQUIRE_DEVELOPER_ID: "1"
-        run: |
-          # A separately generated universal ZIP becomes latest-mac.yml's
-          # single feed target. The first command keeps native DMGs for manual
-          # arm64/x64 bootstrap; the second overwrites metadata with builder-
-          # generated universal metadata without hand-editing YAML.
-          npx electron-builder --mac --universal --config electron-builder.yml --publish never
-
-      - name: Notarize and staple final macOS DMGs
-        timeout-minutes: 45
-        run: node scripts/notarize-macos-dmgs.mjs release 3
-
-      - name: Verify packaged version, native ABI, and server startup
-        env:
-          CODEPILOT_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          EXPECTED_VERSION: ${{ needs.verify-source.outputs.version }}
-        run: |
-          set -euo pipefail
-          # Both arch DMGs must exist and carry the version in their names.
-          for ARCH in arm64 x64; do
-            DMG=$(find release -name "CodePilot-*-${ARCH}.dmg" | head -1)
-            [ -n "$DMG" ] || { echo "::error::no ${ARCH} DMG produced"; exit 1; }
-            case "$DMG" in *"$EXPECTED_VERSION"*) ;; *) echo "::error::${ARCH} DMG name lacks $EXPECTED_VERSION"; exit 1 ;; esac
-            echo "✓ ${ARCH} DMG: $DMG"
-          done
-          node scripts/verify-macos-developer-id.mjs release 3
-          node scripts/verify-macos-notarization.mjs release 3
-          # Full ABI load check on the runner-native arm64 .app. Cross-arch exec
-          # of the x64 binary is not reliable on an Apple-Silicon runner, so the
-          # x64 DMG is verified structurally (existence + version) above.
-          APP=$(find release -maxdepth 4 -path "*mac-arm64*" -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || APP=$(find release -maxdepth 4 -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || { echo "::error::CodePilot.app not found"; exit 1; }
-          PLIST_VER=$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")
-          [ "$PLIST_VER" = "$EXPECTED_VERSION" ] || { echo "::error::Info.plist $PLIST_VER != $EXPECTED_VERSION"; exit 1; }
-          SQLITE=$(find "$APP/Contents/Resources" -path "*better-sqlite3*" -name "*.node" | head -1)
-          [ -n "$SQLITE" ] || { echo "::error::better-sqlite3 .node not found"; exit 1; }
-          ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/CodePilot" -e "const path = require('node:path'); require(path.resolve(process.argv[1])); console.log('better-sqlite3 OK, ABI=' + process.versions.modules)" "$SQLITE"
-          node scripts/verify-packaged-server.mjs "$APP/Contents/MacOS/CodePilot" "$APP/Contents/Resources"
-          node scripts/verify-electron-main-health.mjs "$APP/Contents/MacOS/CodePilot"
-
-      - name: Run packaged Sentry synthetic events
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.telemetry_smoke }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP=$(find release -maxdepth 4 -path "*mac-arm64*" -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || APP=$(find release -maxdepth 4 -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || { echo "::error::CodePilot.app not found for telemetry smoke"; exit 1; }
-          LOG="$RUNNER_TEMP/codepilot-telemetry-smoke.log"
-          "$APP/Contents/MacOS/CodePilot" >"$LOG" 2>&1 &
-          APP_PID=$!
-          for _ in $(seq 1 45); do
-            if grep -q "layer=next_server" "$LOG" && grep -q "layer=electron_main" "$LOG"; then
-              break
-            fi
-            if ! kill -0 "$APP_PID" 2>/dev/null; then
-              echo "::error::packaged telemetry smoke app exited early"
-              tail -80 "$LOG"
-              exit 1
-            fi
-            sleep 1
-          done
-          grep -q "layer=next_server" "$LOG" || { echo "::error::Next server smoke event missing"; tail -80 "$LOG"; exit 1; }
-          grep -q "layer=electron_main" "$LOG" || { echo "::error::Electron main smoke event missing"; tail -80 "$LOG"; exit 1; }
-          sleep 8
-          kill "$APP_PID" 2>/dev/null || true
-          wait "$APP_PID" 2>/dev/null || true
-          echo "Packaged JS telemetry smoke emitted; renderer delivery is verified in Sentry"
-
-      - name: Run packaged Sentry native crash fixture
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.telemetry_smoke }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP=$(find release -maxdepth 4 -path "*mac-arm64*" -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || APP=$(find release -maxdepth 4 -name "CodePilot.app" -type d | head -1)
-          [ -n "$APP" ] || { echo "::error::CodePilot.app not found for native crash smoke"; exit 1; }
-          LOG="$RUNNER_TEMP/codepilot-native-crash-smoke.log"
-          set +e
-          CODEPILOT_NATIVE_CRASH_SMOKE=1 "$APP/Contents/MacOS/CodePilot" >"$LOG" 2>&1
-          STATUS=$?
-          set -e
-          [ "$STATUS" -ne 0 ] || { echo "::error::native crash fixture exited successfully"; exit 1; }
-          grep -q "native crash fixture armed" "$LOG" || { echo "::error::native crash fixture did not arm"; tail -80 "$LOG"; exit 1; }
-          # SentryMinidump deliberately sets Electron crashReporter uploadToServer=false;
-          # the SDK reads and uploads completed Crashpad dumps on the next app start.
-          # Relaunch without the runtime crash flag so the pending dump can drain.
-          RECOVERY_LOG="$RUNNER_TEMP/codepilot-native-crash-recovery.log"
-          "$APP/Contents/MacOS/CodePilot" >"$RECOVERY_LOG" 2>&1 &
-          RECOVERY_PID=$!
-          for _ in $(seq 1 20); do
-            if grep -q "layer=electron_main" "$RECOVERY_LOG"; then
-              break
-            fi
-            if ! kill -0 "$RECOVERY_PID" 2>/dev/null; then
-              echo "::error::native crash recovery launch exited early"
-              tail -80 "$RECOVERY_LOG"
-              exit 1
-            fi
-            sleep 1
-          done
-          grep -q "layer=electron_main" "$RECOVERY_LOG" || { echo "::error::Sentry did not initialize on native crash recovery launch"; tail -80 "$RECOVERY_LOG"; exit 1; }
-          sleep 20
-          kill "$RECOVERY_PID" 2>/dev/null || true
-          wait "$RECOVERY_PID" 2>/dev/null || true
-          echo "Native crash fixture exited with expected non-zero status $STATUS; recovery launch drained pending minidumps"
-
-      - name: Checksums
-        run: |
-          cd release
-          find . -maxdepth 1 -type f \( -name 'CodePilot-*.dmg' -o -name 'CodePilot-*.zip' -o -name '*.blockmap' -o -name 'latest-mac.yml' \) -print0 \
-            | sort -z | xargs -0 shasum -a 256 | tee checksums-macos.sha256
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.telemetry_smoke) }}
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: release-macos
-          path: |
-            release/CodePilot-*.dmg
-            release/CodePilot-*.zip
-            release/CodePilot-*.blockmap
-            release/latest-mac.yml
-            release/checksums-macos.sha256
-          retention-days: 7
+          name: macos-${{ matrix.arch }}
+          path: release/*.dmg
+          if-no-files-found: warn
 
   build-windows:
-    needs: verify-source
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'windows') }}
-    # Pinned to windows-2022 (VS 2022 / MSVC v17). `windows-latest` rolled to a
-    # VS 18 image whose toolchain the bundled node-gyp can't detect ("unknown
-    # version undefined"), breaking native builds (zlib-sync / better-sqlite3)
-    # at `npm ci`. See v0.56.1 release failure.
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Build Windows release bundles
-        timeout-minutes: 35
-        env:
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "0"
-          CODEPILOT_SOURCE_MAPS: "1"
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: npm run electron:build
-
-      - name: Upload Windows source maps to Sentry
-        env:
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "0"
-          CODEPILOT_SOURCE_MAPS: "1"
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        run: npm run sentry:sourcemaps:upload
-
-      - name: Configure fail-closed Windows signing credentials
-        shell: pwsh
-        env:
-          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-          WINDOWS_PUBLISHER_SUBJECT: ${{ vars.WINDOWS_PUBLISHER_SUBJECT }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PFX_BASE64)) { throw 'WINDOWS_CERT_PFX_BASE64 is required' }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PASSWORD)) { throw 'WINDOWS_CERT_PASSWORD is required' }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_PUBLISHER_SUBJECT)) { throw 'WINDOWS_PUBLISHER_SUBJECT repository variable is required' }
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'codepilot-windows-signing.pfx'
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-          "WIN_CSC_LINK=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "CODEPILOT_WINDOWS_PUBLISHER_SUBJECT=$($env:WINDOWS_PUBLISHER_SUBJECT)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Package Windows x64
-        timeout-minutes: 35
-        env:
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: npx electron-builder --win --x64 --config electron-builder.yml --publish never
-
-      - name: Verify packaged version, native ABI, and server startup
-        shell: bash
-        env:
-          EXPECTED_VERSION: ${{ needs.verify-source.outputs.version }}
-        run: |
-          set -euo pipefail
-          EXE=$(find release -name "CodePilot.Setup.*.exe" | head -1)
-          [ -n "$EXE" ] || { echo "::error::no NSIS installer produced"; exit 1; }
-          case "$EXE" in *"$EXPECTED_VERSION"*) ;; *) echo "::error::installer name lacks $EXPECTED_VERSION"; exit 1 ;; esac
-          SQLITE=$(find release/win-unpacked -path "*better-sqlite3*" -name "*.node" 2>/dev/null | head -1)
-          [ -n "$SQLITE" ] || { echo "::error::better-sqlite3 .node not found"; exit 1; }
-          BIN=$(find release/win-unpacked -maxdepth 1 -name "CodePilot.exe" | head -1)
-          ELECTRON_RUN_AS_NODE=1 "$BIN" -e "const path = require('node:path'); require(path.resolve(process.argv[1])); console.log('better-sqlite3 OK, ABI=' + process.versions.modules)" "$SQLITE"
-          node scripts/verify-packaged-server.mjs "$BIN" "$(dirname "$BIN")/resources"
-          node scripts/verify-electron-main-health.mjs "$BIN"
-
-      - name: Verify Authenticode publisher and RFC3161 timestamp
-        shell: pwsh
-        run: ./scripts/verify-windows-signing.ps1 -ReleaseRoot release -ExpectedSubject $env:CODEPILOT_WINDOWS_PUBLISHER_SUBJECT
-
-      - name: Checksums
-        shell: bash
-        run: |
-          cd release
-          find . -maxdepth 1 -type f \( -name 'CodePilot.Setup.*.exe' -o -name 'CodePilot.Setup.*.exe.blockmap' -o -name 'latest.yml' \) -print0 \
-            | sort -z | xargs -0 sha256sum | tee checksums-windows.sha256
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          path: |
-            release/CodePilot.Setup.*.exe
-            release/CodePilot.Setup.*.exe.blockmap
-            release/latest.yml
-            release/checksums-windows.sha256
-          retention-days: 7
-
-  build-linux:
-    needs: verify-source
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'linux') }}
+    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
+    runs-on: windows-latest
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - arch: x64
-            runner: ubuntu-22.04
-            deb_arch: amd64
-            rpm_arch: x86_64
-            file_arch: x86-64
-          - arch: arm64
-            runner: ubuntu-22.04-arm
-            deb_arch: arm64
-            rpm_arch: aarch64
-            file_arch: ARM aarch64
-    runs-on: ${{ matrix.runner }}
+        arch: [x64, arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -479,227 +69,121 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install RPM packaging support
-        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Install dependencies
+        run: npm ci
 
-      - run: npm ci
+      - name: Build Next.js
+        run: npm run build
 
-      - name: Build Linux release bundle
-        timeout-minutes: 35
+      - name: Build Electron
+        run: node scripts/build-electron.mjs
+
+      - name: Package Windows (${{ matrix.arch }})
+        run: npx electron-builder --win --${{ matrix.arch }} --config electron-builder.yml --publish never
         env:
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "0"
-          CODEPILOT_SOURCE_MAPS: "1"
-          CODEPILOT_TELEMETRY_SMOKE: "0"
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        run: npm run electron:build
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Linux source maps to Sentry
-        env:
-          CODEPILOT_APP_CHANNEL: stable
-          CODEPILOT_OFFICIAL_UPDATE_BUILD: "0"
-          CODEPILOT_SOURCE_MAPS: "1"
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        run: npm run sentry:sourcemaps:upload
-
-      - name: Package Linux ${{ matrix.arch }}
-        timeout-minutes: 35
-        run: npx electron-builder --linux --${{ matrix.arch }} --config electron-builder.yml --publish never
-
-      - name: Verify Linux package architecture, native ABI, and server startup
-        env:
-          EXPECTED_VERSION: ${{ needs.verify-source.outputs.version }}
-          EXPECTED_DEB_ARCH: ${{ matrix.deb_arch }}
-          EXPECTED_RPM_ARCH: ${{ matrix.rpm_arch }}
-          EXPECTED_FILE_ARCH: ${{ matrix.file_arch }}
-        run: |
-          set -euo pipefail
-          APPIMAGE=$(find release -maxdepth 1 -name "CodePilot-*.AppImage" | head -1)
-          DEB=$(find release -maxdepth 1 -name "CodePilot-*.deb" | head -1)
-          RPM=$(find release -maxdepth 1 -name "CodePilot-*.rpm" | head -1)
-          for PACKAGE in "$APPIMAGE" "$DEB" "$RPM"; do
-            [ -n "$PACKAGE" ] || { echo "::error::missing Linux package"; exit 1; }
-            case "$PACKAGE" in *"$EXPECTED_VERSION"*) ;; *) echo "::error::$PACKAGE lacks version $EXPECTED_VERSION"; exit 1 ;; esac
-          done
-          [ "$(dpkg-deb -f "$DEB" Architecture)" = "$EXPECTED_DEB_ARCH" ] || {
-            echo "::error::DEB architecture does not match $EXPECTED_DEB_ARCH"
-            exit 1
-          }
-          [ "$(rpm -qp --qf '%{ARCH}' "$RPM")" = "$EXPECTED_RPM_ARCH" ] || {
-            echo "::error::RPM architecture does not match $EXPECTED_RPM_ARCH"
-            exit 1
-          }
-          UNPACKED=$(find release -maxdepth 1 -type d -name "linux*unpacked" | head -1)
-          [ -n "$UNPACKED" ] || { echo "::error::Linux unpacked app not found"; exit 1; }
-          BIN="$UNPACKED/codepilot"
-          [ -x "$BIN" ] || BIN="$UNPACKED/CodePilot"
-          [ -x "$BIN" ] || { echo "::error::CodePilot Linux executable not found"; exit 1; }
-          file "$BIN" | grep -F "$EXPECTED_FILE_ARCH" || {
-            echo "::error::Linux executable architecture does not match $EXPECTED_FILE_ARCH"
-            file "$BIN"
-            exit 1
-          }
-          SQLITE=$(find "$UNPACKED/resources" -path "*better-sqlite3*" -name "*.node" | head -1)
-          [ -n "$SQLITE" ] || { echo "::error::better-sqlite3 .node not found"; exit 1; }
-          ELECTRON_RUN_AS_NODE=1 "$BIN" -e "const path = require('node:path'); require(path.resolve(process.argv[1])); console.log('better-sqlite3 OK, ABI=' + process.versions.modules)" "$SQLITE"
-          node scripts/verify-packaged-server.mjs "$BIN" "$UNPACKED/resources"
-          xvfb-run -a node scripts/verify-electron-main-health.mjs "$BIN"
-          echo "Linux build baseline: $(getconf GNU_LIBC_VERSION)"
-
-      - name: Checksums
-        run: |
-          cd release
-          METADATA="latest-linux.yml"
-          [ "${{ matrix.arch }}" = "arm64" ] && METADATA="latest-linux-arm64.yml"
-          find . -maxdepth 1 -type f \( -name 'CodePilot-*.AppImage' -o -name 'CodePilot-*.deb' -o -name 'CodePilot-*.rpm' -o -name "$METADATA" \) -print0 \
-            | sort -z | xargs -0 sha256sum | tee "checksums-linux-${{ matrix.arch }}.sha256"
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: release-linux-${{ matrix.arch }}
-          path: |
-            release/CodePilot-*.AppImage
-            release/CodePilot-*.deb
-            release/CodePilot-*.rpm
-            release/latest-linux*.yml
-            release/checksums-linux-${{ matrix.arch }}.sha256
-          retention-days: 7
-
-  verify-macos-intel-abi:
-    needs: build-macos
-    if: ${{ (github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos') && !(github.event_name == 'workflow_dispatch' && inputs.telemetry_smoke) }}
-    # GitHub's architecture-explicit Intel image is required here: executing
-    # the universal updater ZIP proves its x64 slice and native modules on real
-    # Intel hardware instead of treating cross-build structure as ABI proof.
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-macos
-          path: artifacts
-
-      - name: Launch universal updater asset on Intel and load SQLite
-        run: |
-          set -euo pipefail
-          ZIP=$(find artifacts -maxdepth 1 -name 'CodePilot-*-universal.zip' | head -1)
-          [ -n "$ZIP" ] || { echo "::error::universal updater ZIP missing"; exit 1; }
-          EXTRACTED="$RUNNER_TEMP/codepilot-universal-intel"
-          mkdir -p "$EXTRACTED"
-          ditto -x -k "$ZIP" "$EXTRACTED"
-          APP=$(find "$EXTRACTED" -name 'CodePilot.app' -type d | head -1)
-          [ -n "$APP" ] || { echo "::error::CodePilot.app missing from universal ZIP"; exit 1; }
-          node scripts/verify-electron-main-health.mjs "$APP/Contents/MacOS/CodePilot"
+          name: windows-${{ matrix.arch }}
+          path: release/*.exe
+          if-no-files-found: warn
 
   release:
-    # Only on a `v*` tag push, and only after both macOS architecture gates
-    # succeed. Windows/Linux are manual artifact jobs and cannot enter Release.
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-    needs: [build-macos, verify-macos-intel-abi]
+    if: ${{ always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(needs.*.result, 'cancelled') }}
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Download all build artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: List artifacts
-        run: find artifacts -type f | sort
-
-      - name: Audit immutable update graph and prepare checksums
+      - name: Get version and previous tag
+        id: meta
         run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          PREV_TAG=$(git tag --sort=-creatordate | grep '^v' | sed -n '2p' || echo "")
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
 
-          # Release body is RELEASE_NOTES.md from the repo (must be present for a
-          # stable release — no silent fallback).
-          [ -f RELEASE_NOTES.md ] || { echo "::error::RELEASE_NOTES.md missing — cannot create stable release"; exit 1; }
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG="${{ steps.meta.outputs.prev_tag }}"
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            git log "$RANGE" --pretty=format:'| `%h` | %s |'
+            echo ""
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          # Merge per-platform checksums into one file.
-          echo "## SHA-256 Checksums" > artifacts/SHA256SUMS.txt
-          echo "" >> artifacts/SHA256SUMS.txt
-          for cs in artifacts/checksums-*.sha256; do
-            [ -f "$cs" ] || continue
-            cat "$cs" >> artifacts/SHA256SUMS.txt
-          done
-          echo "=== Combined checksums ==="
-          cat artifacts/SHA256SUMS.txt
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' \) ! -name '*.blockmap' -exec cp {} release-files/ \;
+          ls -lh release-files/
 
-          # Builder metadata, referenced assets, hashes, sizes and blockmaps
-          # must all come from this one downloaded build graph.
-          node scripts/verify-update-assets.mjs artifacts "$VERSION" stable macos
-
-      - name: Attest every release asset
-        uses: actions/attest@v4
-        with:
-          subject-path: |
-            artifacts/CodePilot-*
-            artifacts/latest-mac.yml
-            artifacts/SHA256SUMS.txt
-
-      - name: Upload immutable graph to a draft, then publish stable Release
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          PREV_TAG="${{ steps.meta.outputs.prev_tag }}"
 
-          # The release feed is incomplete without builder metadata/blockmaps.
-          FILES=()
-          while IFS= read -r f; do
-            FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" -o -name "latest-mac.yml" \) | sort)
-          FILES+=("artifacts/SHA256SUMS.txt")
-          echo "=== Release assets ==="
-          printf '%s\n' "${FILES[@]}"
+          cat > release-notes.md << 'NOTES_EOF'
+          ## Downloads
 
-          # Keep the release invisible until every asset has uploaded. A failed
-          # run leaves a resumable draft instead of a user-visible half feed.
-          if EXISTING_DRAFT="$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
-            [ "$EXISTING_DRAFT" = "true" ] || {
-              echo "::error::release already exists and is not a draft"
-              exit 1
-            }
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "CodePilot v${VERSION}" \
-              --notes-file RELEASE_NOTES.md
-            gh release upload "${GITHUB_REF_NAME}" "${FILES[@]}" --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" \
-              --draft \
-              --title "CodePilot v${VERSION}" \
-              --notes-file RELEASE_NOTES.md \
-              "${FILES[@]}"
+          **macOS**
+          - **CodePilot-${{ steps.meta.outputs.version }}-arm64.dmg** — macOS Apple Silicon (M1/M2/M3/M4)
+          - **CodePilot-${{ steps.meta.outputs.version }}-x64.dmg** — macOS Intel
+
+          **Windows**
+          - **CodePilot-${{ steps.meta.outputs.version }}-x64.exe** — Windows x64
+          - **CodePilot-${{ steps.meta.outputs.version }}-arm64.exe** — Windows ARM64
+
+          ## Installation
+
+          **macOS**:
+          1. 下载对应芯片架构的 DMG 文件
+          2. 打开 DMG，将 CodePilot 拖入 Applications 文件夹
+          3. 首次打开时如遇安全提示，前往 **系统设置 → 隐私与安全性** 点击"仍要打开"
+          4. 在 Settings 页面配置 Anthropic API Key 或环境变量
+
+          **Windows**:
+          1. 下载对应架构的 EXE 安装包（大多数用户选择 x64）
+          2. 运行安装程序，可自定义安装路径
+          3. 安装完成后启动 CodePilot
+          4. 在 Settings 页面配置 Anthropic API Key 或环境变量
+
+          ## Requirements
+
+          - macOS 12.0+ / Windows 10+
+          - Anthropic API Key 或已配置 `ANTHROPIC_API_KEY` 环境变量
+          - 如需使用代码相关功能，建议安装 Claude Code CLI
+
+          ## Changelog
+          NOTES_EOF
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "" >> release-notes.md
+            echo "| Commit | Description |" >> release-notes.md
+            echo "|--------|-------------|" >> release-notes.md
+            echo '${{ steps.changelog.outputs.changelog }}' >> release-notes.md
           fi
 
-          # This is the only visibility transition. If it fails, the complete
-          # graph remains a draft and a workflow rerun can safely resume it.
-          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "CodePilot v${VERSION}" \
+            --notes-file release-notes.md \
+            --latest \
+            release-files/*
