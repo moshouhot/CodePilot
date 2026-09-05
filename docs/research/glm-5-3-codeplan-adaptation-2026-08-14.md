@@ -1,7 +1,5 @@
 # GLM-5.3 CodePlan 适配核验
 
-> **历史基线**：本文记录 2026-08-14 的 5.3 / 5-Turbo / 4.7 阵容。2026-08-26 当前目录与 Flash 合同见 [GLM-5.3-Flash Coding Plan 适配核验](glm-5-3-flash-codeplan-adaptation-2026-08-26.md)。
-
 > 核验日期：2026-08-14
 > 范围：智谱 Coding Plan 中国区 / 国际区、Claude Code、Codex、CodePilot 模型目录与请求链路。
 
@@ -9,7 +7,7 @@
 
 - GLM-5.3 已在 Coding Plan 全量开放；通用 API 仍标注“即将上线”。本轮只更新已有 `glm-cn` / `glm-global` CodePlan，不虚构尚未开放的 PAYG API 入口。
 - 当前 CodePlan 主目录是 `GLM-5.3`、`GLM-5-Turbo`、`GLM-4.7`。GLM-5.2 / 5.1 请求会由上游自动路由到 5.3，但 CodePilot 目录直接展示当前官方名称，不继续把旧别名当成当前模型。
-- GLM-5.3 是文本输入/文本输出模型，官方标称 1M context、最大输出 131,072，支持 function calling、streaming、caching、structured output 与 MCP。2026-08-26 引用精度复核后，产品按官方配置值使用 1,000,000，不再把 1M 擅自解释为 1,048,576。图片能力来自套餐附带的 GLM-4.6V Vision MCP，不应把 GLM-5.3 本体标成 vision model。
+- GLM-5.3 是文本输入/文本输出模型，1,048,576 context、最大输出 131,072，支持 function calling、streaming、caching、structured output 与 MCP。图片能力来自套餐附带的 GLM-4.6V Vision MCP，不应把 GLM-5.3 本体标成 vision model。
 - Claude 与 Codex 的模型 ID 不同：Claude 配置使用 `glm-5.3[1m]`，Codex 的原生 Responses 使用裸 `glm-5.3`。CodePilot 保留一个用户可见的 GLM-5.3 行，在 transport capability 中做精确 ID 改写，避免重复模型。
 - GLM-5.3 的实际推理档位为 Low / High / Max，默认 Max。CodePlan 兼容层把 `minimal/light/low → low`、`medium/high → high`、`xhigh/max/ultra → max`；显式 effort 优先于 thinking toggle。本轮把兼容别名建模在 first-party Responses wire 上，不把 `medium` / `xhigh` 展示成额外真实档位。
 - 官方 Codex 配置为原生 OpenAI Responses：CN `https://open.bigmodel.cn/api/v1`，Global `https://api.z.ai/api/v1`。GLM-5.3 支持 reasoning summaries、parallel tool calls 与 freeform apply_patch；不支持 verbosity，input modality 仅 text。

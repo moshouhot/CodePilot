@@ -51,17 +51,9 @@
 |---|---|---|---|
 | Claude Code | `replay_context` | `replay_context` | 清 Claude SDK ref，使用 canonical DB history 建新底层 session |
 | CodePilot | `replay_context` | `replay_context` | DB history 重放；无原生 session ref 要清 |
-| Codex | `in_session` | `replay_context` | 同 Provider 续 thread 换模型；跨 Provider 保留产品聊天并从该聊天历史续接 |
+| Codex | `in_session` | `new_session` | 同 thread 可换模型；Provider 变化走 handoff 新聊天 |
 
 跨 Runtime 永远是 `new_session`。这个矩阵是服务端事实，Picker 只消费 owner Runtime 内的结果，不按名字猜；bound 会话的 Runtime lane disabled，不能把 `new_session` 偷偷伪装成一次普通下拉选择。
-
-2026-09-05 修订来自真实旧聊天反馈：锁定的是 Runtime，服务商和模型仍可在当前聊天切换。`codex/thread-continuation.ts` 在 Provider/MCP 变化或 resume 失败时，将已有摘要和历史交给底层执行，不修改或复制产品消息。`codex/continuation-context.ts` 从 caller snapshot 的最早 rowid 向前按需分页，以真实预算而非 199 条消息或固定字符数选择历史；summary coverage boundary 经 `claude-client.ts` 传递，不能重新喂入已经概括的消息。复用 fallback 的归一化/格式化，但只在 Codex 续接中关闭固定字符 microcompaction，Claude emergency fallback 行为不变。
-
-历史图片从 user 消息前缀元数据恢复，必须经过 `resolveInTreeAttachmentPath` 的项目 realpath 边界校验。项目目录取产品 session 的 working_directory，不能因 native sdk_cwd 进入子目录而误判上传文件越界。视觉能力来自目标 Provider 精确 catalog model 的 `vision` 或 Codex Account 缓存 `inputModalities`；明确支持时附加历史 localImage，否则保留安全路径并注明未附加像素。缺失/越界文件记录 unavailable；不从 assistant 文本解析路径。只携带预算内历史的图片，估算预留图片和文本包装开销，不冒充实际用量。
-
-成功 resume 只提交当前输入，不分页、不重放历史图片；replacement ref 仅在首轮输入被接受后持久化，失败后重试仍带历史。没有 rowid 的合成 history 保持调用方提供的范围。当前修复无 schema 变更，也不新建产品聊天。
-
-route 校验与执行 resolver 共用 DB + catalog 事实，不能因用户尚未打开模型管理页而拒绝可用目录模型。显式选择 Codex Account 会进行有上限的模型发现，防止路由模块空缓存误报 `INVALID_ROUTE_MODEL`；被动列表和 recovery safe mode 的禁止启动约束继续保留。
 
 ## Handoff
 
@@ -100,9 +92,6 @@ manual、auto、reactive 三入口通过 `commitSessionCompaction()` 原子写 s
 - `src/lib/runtime/thread-execution-binding.ts`
 - `src/lib/runtime/continuation-policy.ts`
 - `src/lib/runtime/route-validation.ts`
-- `src/lib/codex/thread-continuation.ts`
-- `src/lib/codex/continuation-context.ts`
-- `src/lib/fallback-context.ts`
 - `src/lib/runtime/handoff-payload.ts`
 - `src/lib/runtime/turn-usage.ts`
 - `src/lib/runtime/compaction-policy.ts`

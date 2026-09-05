@@ -1,8 +1,8 @@
 # Runtime 会话所有权、交接与成本可见性（P0 / P1）
 
 > 创建时间：2026-09-01
-> 最后更新：2026-09-05
-> 状态：🟡 9 月 5 日复审两项 P2 已修复并通过定向/全量/E2E（5485 pass / 1 skip，E2E 3/3）；原聊天切换已有 Dev smoke；本次历史图片真实视觉模型 smoke、独立复审及原计划其他长历史 smoke 仍未完成
+> 最后更新：2026-09-01
+> 状态：🟡 P0/P1 产品代码与文档已实现，Tier 2 验证收口中；真实三 Runtime smoke 待跑
 > 风险等级：Tier 2（Runtime resolver / 会话续接 / Provider+Model route / DB schema / 计费展示）
 > 事实基线：[T3 Code 最新版 Runtime 适配与会话切换分析](../../research/t3code-runtime-adaptation-and-switching-2026-09-01.md)
 > UI 相邻计划：[Composer 模型路线、能力参数与权限入口收口](composer-model-route-permission-consolidation.md)
@@ -10,33 +10,11 @@
 
 ## 一句话结论
 
-一个聊天在第一次真实执行时选定 Runtime，此后 Composer 的 Runtime lane 置灰。同一 Runtime 内的兼容模型和服务商必须能在原聊天切换，保留 ID、历史和页面，由 adapter 处理底层续接。跨 Runtime 的 Handoff 后端保留，普通下拉不自动创建或跳转新聊天；未来只有独立、明确且带确认的入口可以调用。
+一个聊天在第一次真实执行时选定 Runtime，此后 Composer 的 Runtime lane 置灰，不再原地换 Runtime。Handoff 后端保留，但普通下拉不自动创建或跳转新聊天；未来只有独立、明确且带确认的“在新聊天中继续”入口可以调用。同一 Runtime 内能不能换模型或渠道，由该 Runtime 明确声明，服务端最终裁决。
+
+这不是把选择权拿掉，而是把一个当前看似灵活、实际上容易丢上下文和浪费缓存的操作，改成结果可预期的“继续到新聊天”。
 
 ## 用户问题与争议
-
-### 2026-09-05 GPT-5.6 修复复审：两项 P2 已修复、Tests pass
-
-用户授权后的修复已落地：仅 Codex fresh-thread 续接按预算分页补齐 DB 历史、保留预算内完整文本并恢复经过项目路径校验的历史附件；正常 resume 不重放，Claude fallback 行为保持原状。新增回归先 RED（7 fail / 2 pass），修复后 9/9；8 文件定向 82/82、全量 5485 pass / 1 skip、相关 E2E 3/3。以下 R1/R2 描述保留初次审查的触发条件，关闭证据为新增测试和修复代码，不是聊天确认。
-
-- [x] R1：预算驱动历史分页与无固定字符截断，覆盖摘要边界和超预算反例。
-- [x] R2：安全恢复历史图片，覆盖本轮图片、缺失/越界文件、无视觉能力和 resume 反例。
-- [x] 定向/全量验证与 guardrail、交接回写。
-
-- [审查记录与复现证据](../../research/gpt56-fixes-review-2026-09-05.md)：本轮复跑单测 5476 pass / 1 skip、相关 E2E 3/3，普通切换路径成立；以下边界未被昨晚短对话验证覆盖。
-- R1 / P2：Codex 跨 Provider 重建底层 thread 时，300 条短消息仅传最近 199 条，即使总计约 4196 tokens、预算 100000；近期长消息也会在预算筛选前截断中间需求。需要按预算加载、保留必要历史并补长历史回归。
-- R2 / P2：历史图片元数据被 fallback 清除，仅本轮 files 进入新 thread；两条历史即可复现旧图片内容与路径均缺失。需要恢复历史附件续接并补视觉输入回归。
-- 两项初次审查均用隔离数据和生产输入构建函数确认；后续已获用户授权修改并补回归。未以真实视觉模型验证图片回答，也不将本次 Tests pass 升级为独立 Review passed。
-
-### 2026-09-05 用户反馈修订：同 Runtime 必须能换模型
-
-- Signal：真实 Dev 旧聊天由 Codex 账号 GPT 切到 DeepSeek，接口返回 `ROUTE_REQUIRES_HANDOFF`，界面仅提示保存失败。用户明确要求修复：不能换 Runtime 可预期，不能换模型不可接受。
-- Triage：之前将 Codex 的“底层 thread 不能复用”误等同于“产品聊天必须另建”。本轮保留 Runtime owner，允许同 Runtime Provider+Model 原子切换，沿用同一聊天和数据库历史。
-- Fix（完成）：Codex Provider 变化声明为 `replay_context`；新底层 thread 首轮使用已有摘要及已过滤压缩边界的最近历史，成功 resume 不重复注入。保留旧 ref 到新 thread 的首轮被接受后再替换，避免启动/发送失败后重试丢历史。普通 Picker 不跳转、不新建产品聊天。
-- Triage / Fix 补充：目录模型尚未落库时，route 只查 DB 会误报 `INVALID_ROUTE_MODEL`，改为使用 execution resolver 的 DB + catalog 视图。实机切回 GPT 又发现路由模块空缓存误拒绝，显式模型选择改为有 2500ms 上限的发现，保留 recovery safe mode 约束。
-- Verify（通过）：三 Runtime HTTP/UI 跨服务商正例与跨 Runtime 负例；完整单测 5475 pass / 1 既有 skip；最后强化用例定向 17/17；合跑 E2E 3/3。Dev 同一 8 月旧聊天完成 GPT → DeepSeek → GLM → DeepSeek → GPT，实际 DeepSeek 回复确认切换前历史；聊天总数与原消息不变。
-- Guardrail（完成）：Runtime、Composer、handover 及本计划已同步；无 schema 变更、无发版。本轮不宣称原计划其他 smoke 全部完成。
-
-以下 2026-09-01 的历史裁决中，Codex Provider 变化要求新产品聊天的部分由上述用户决定取代；跨 Runtime 的所有权约束继续有效。
 
 当前产品允许在已有聊天中直接切换 Claude Code、CodePilot、Codex 三种 Runtime。这个设计有三个实际问题：
 
@@ -97,15 +75,13 @@ T3 Code 的可参考点不是“支持更多随意切换”，而是把边界说
 | Phase 0 | P0 前置 | RED 合同、旧数据分类、三 Runtime 续接 POC | 🟡 合同/fixture 完成；真实协议 POC 与 baseline 待跑 | 暂无 UI 改变 |
 | Phase 1 | P0 | 原子路线与 Runtime owner 服务端合同 | ✅ 已实现 | 错误切换不再写坏会话 |
 | Phase 2 | P0 | Composer / 老会话恢复界面 | ✅ 已实现 | 已开始聊天显示固定 Runtime，左侧 Runtime lane 置灰；普通 Picker 不再跳转新聊天 |
-| Phase 3 | P1 | 同 Runtime continuation capability | 🟡 原聊天切换及两项 P2 历史续接修复通过定向/全量/E2E；已有 Codex→DeepSeek Dev smoke；本次真实视觉与完整协议矩阵待跑 | 原聊天内切换兼容模型与服务商，Runtime 固定；预算内文本、可用历史图片承接 |
+| Phase 3 | P1 | 同 Runtime continuation capability | 🟡 policy 已实现；真实协议 smoke 待跑 | 只允许声明支持的模型 / 渠道变化 |
 | Phase 4 | P1 | 跨 Runtime 新聊天与交接包 | 🟡 后端、交接包与目标卡片已实现；普通 Picker 入口按实机反馈关闭，显式确认 UX 待另行设计 | 新聊天带来源和可读交接卡片，但不会由普通 Runtime 下拉突然触发 |
 | Phase 5 | P1 | 用量、缓存与成本真实性 | 🟡 已实现；真实收益样本待积累 | 看见真实缓存分桶；未知费用不显示 0 |
 | Phase 6 | P1 | 压缩策略对齐与缓存影响提示 | 🟡 已实现；真实长线程 smoke 待跑 | 发生压缩、覆盖边界、底层 session 重建均可见 |
 | Phase 7 | P0/P1 收口 | Tier 2 回归、真实 smoke、guardrail 与交接文档 | 🔄 进行中 | 自动化回归收口；真实 smoke 仍明确待跑 |
 
 ## 决策日志
-
-- 2026-09-05：用户授权修复复审 R1/R2（工作区未提交，基线 `9bef7299`）。Codex replacement 从 caller rowid snapshot 懒分页，保留摘要边界和预算内文本；仅从 user 元数据恢复项目范围内历史附件，视觉能力不足保留引用并明确降级。RED 7 fail / 2 pass → 9/9，8 文件定向 82/82，全量 5485 pass / 1 skip，E2E 3/3；同步 Runtime guardrail 和 handover。首次全量暴露旧图片接线 source-pin 需随调用链更新，修正后定向通过；一次并发 E2E 清理与 tsc 临时类型文件冲突，改顺序执行后完整门禁通过。两项修复 Tests pass，不冒充真实视觉 smoke / 独立复审。
 
 - 2026-09-01：采纳“聊天开始后 Runtime 单 owner”。原因：CodePilot 三条续聊路径没有共同的原地切换语义，保留当前能力的维护成本高于真实使用收益。
 - 2026-09-01：跨 Runtime 不做透明迁移，统一创建新聊天。原因：复制 Claude/Codex 原生 session ref 既不可靠也会制造两份历史的所有权歧义。
@@ -493,8 +469,7 @@ P1 只补这些缺口：
 #### 执行清单
 
 - [x] 落 `RuntimeContinuationPolicy` 与 `continuationKey`，shipping matrix 由当前 adapter/protocol fixture 固定；真实协议 smoke 仍待补。
-- [x] 复审 R1/R2：Codex replacement 按预算向前加载历史、保留完整文本，并恢复安全历史图片；新增 `codex-continuation-context.test.ts` 覆盖正常/反例。
-- [x] `in_session` 保留当前 Runtime ref；Claude `replay_context` 清 SDK ref，Codex `replay_context` 保留旧 ref 到带当前历史的 replacement 首轮接受后再替换；其他 Runtime refs 不再有“回切恢复旧分支”的执行意义。
+- [x] `in_session` 保留当前 Runtime ref；`replay_context` 只清当前 Runtime ref 并用 canonical history；其他 Runtime refs 不再有“回切恢复旧分支”的执行意义。
 - [x] `new_session` 导向 Phase 4 handoff；`unsupported` 前后端都拒绝。
 - [x] Picker action / warning reason 来自服务端 policy，不由收藏 snapshot 抬升。
 - [ ] 覆盖 provider 删除、entitlement 失败、stale capability cache 和真实 Runtime report mismatch。
@@ -643,12 +618,6 @@ P0 作为一个可发布切片：binding migration、server guard、legacy recov
 
 | Date | 命令 | 结果 | 说明 |
 |------|------|------|------|
-| 2026-09-05 | R1/R2 RED → 定向 + `npm run test` | ✅ Tests pass | 新增回归修复前 7 fail / 2 pass，修复后 9/9；8 文件定向 82/82；最终 typecheck / Harness boundary / 单测 5485 pass / 0 fail / 1 skip；Windows junction fixture 和路径断言调整后额外 9/9 |
-| 2026-09-05 | `test:e2e -- old-chat-model-route.spec.ts model-identity-conflict.spec.ts --workers=1 --reporter=line` | ✅ 3/3 | 修复后隔离服务回归，原聊天 route/URL/消息保持，GLM 冲突定位正常；不含真实视觉模型调用 |
-| 2026-09-05 | ESLint + docs-drift + diff check | ✅ 通过 | 产品及测试改动无 ESLint error；claude-client 保留 3 个既有 unused warning；索引/空白检查通过 |
-| 2026-09-05 | `npm run test` + 最后强化断言定向回归 | ✅ 通过 | 完整 5475 pass / 0 fail / 1 既有 skip，typecheck / Harness boundary 通过；最后启动失败用例与断言强化定向 17/17 |
-| 2026-09-05 | `test:e2e -- old-chat-model-route.spec.ts model-identity-conflict.spec.ts --workers=1` | ✅ 3/3 | 隔离 DB；三 Runtime 原聊天跨 Provider 切模型、未落库 catalog、ID/URL/消息/数量保持及跨 Runtime 409；含前一项 GLM 身份冲突回归 |
-| 2026-09-05 | 修改源文件 ESLint + `lint:hooks` + `lint:docs-drift` + `git diff --check` | ✅ 无 error | ESLint 仅 `claude-client.ts` 3 个既有 unused warning；hooks、索引及空白检查通过 |
 | 2026-09-01 | `npm run test` | ✅ 通过 | typecheck + Harness boundary + unit：5455 tests，5454 pass，0 fail，1 个既有 skip |
 | 2026-09-01 | owner / handoff / usage / compaction targeted tests | ✅ 通过 | 15/15；使用临时隔离 DB，覆盖 CAS、零写入、幂等、unknown cost/cache 与 compaction transaction |
 | 2026-09-01 | Runtime lane lock targeted regression | ✅ 通过 | 112/112；覆盖 bound / first-message reload window、disabled UI、callback fail-closed、普通 Picker 不再调用 handoff / surprise navigation |
@@ -665,7 +634,7 @@ P0 作为一个可发布切片：binding migration、server guard、legacy recov
 | 待跑 | Codex | CodePilot | 真实登录态 + API key | 独立 handoff 确认入口恢复后执行 | 新聊天首轮收到同一 handoff facts | ⏸ | 普通 Picker 已锁定；显式 UX 待设计 |
 | 待跑 | CodePilot | Claude Code | API key / CLI | 独立 handoff 确认入口恢复后执行 | 新聊天 + 缓存重建提示 | ⏸ | 普通 Picker 已锁定；显式 UX 待设计 |
 | 待跑 | Claude Code | 同 Runtime 新模型 | 真实 Provider | capability POC / 真实切换 | 与 shipping mode 一致 | ⏳ | — |
-| 2026-09-05 | Codex | GPT / DeepSeek / GLM 同 Runtime 切换 | 真实账号 + 已配置 API key | Dev 旧聊天 UI 切换；DeepSeek 实际续聊 | 原聊天保存且保留历史 | ✅ 本轮通过 | session `285fad544f7009c7e373d37441d62b4b`，route revision 2→6，总聊天数 587 不变，9 条原消息保留；追加 smoke 一问一答，proxy/chat 200；详见旧聊天诊断记录 |
+| 待跑 | Codex | 同 Runtime 新模型 / Provider | 真实登录态 | thread resume / turn start | 与 shipping mode 一致 | ⏳ | — |
 | 待跑 | CodePilot | 同 Runtime 新模型 / Provider | API key | DB replay + 工具历史 | 上下文与 tool pair 完整 | ⏳ | — |
 | 待跑 | Legacy | empty pin + 单 / 双 ref | 隔离旧库 fixture | 迁移与恢复 | 唯一证据绑定；歧义要求用户选择 | ⏳ | — |
 | 待跑 | 任意 bound | 另一 Runtime API PATCH | 隔离 DB | 绕过 UI | 409 且所有事实零写入 | ⏳ | — |
