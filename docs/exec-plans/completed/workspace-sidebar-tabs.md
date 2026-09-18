@@ -2,7 +2,6 @@
 
 > 创建时间：2026-04-29
 > 最后更新：2026-04-30（Phase 2 完成）
-> **Superseded breadcrumb（2026-08-25）**：本文记录的“独立 FileTree rail + Workspace Sidebar”与 Files pin 形态已由 Active index 中的 `workspace-surface-sidebar-pin-and-inspector.md` 取代。当前是一个 shell 内的 Files Primary + Preview Inspector；历史动机保留，不再作为现行验收合同。
 
 ## Phase 2 完成后的实际形态（2026-04-30）
 
@@ -164,3 +163,4 @@
 - 打开同一个 Markdown / Artifact / 文件预览不会重复创建 Tab；切回旧 Tab 内容能正确恢复。
 - 侧栏展开、收起、resize 在桌面宽度下无布局挤压；窄屏有降级策略。
 - CDP 验证：打开 / 收起侧栏、切换固定 Tab、打开动态 Tab、关闭动态 Tab、文件树轻量入口、pin Files、互斥行为。
+

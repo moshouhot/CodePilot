@@ -2,7 +2,6 @@
 
 > 创建时间：2026-09-18
 > 最后更新：2026-09-18
-> 发布状态：Shipped — v0.67.16；真实 AI Studio / Windows 会话 smoke 仍待执行。
 
 ## 用户目标与取舍
 
@@ -100,13 +99,3 @@
 - Release Notes 明示真实 Gemini 与 Windows packaged 缺口，不宣称该部分 Smoke passed；CI 将执行签名、公证、三平台启动与资产图门禁。尚未标记 Shipped。
 
 - 保存失败提示独立隔离 UI：5/5 通过，日志 `/tmp/codepilot-06716-save-ui.log`；已清理本次 E2E 自动生成的 tsconfig 路径，保留原配置。
-
-## Shipped — v0.67.16（2026-09-18）
-
-- [x] 提交 `17c716c6f3ca613e2e52bf18cebca8afa5eabe63`（61 文件）；main 和全新不可变 `v0.67.16` tag 已推送。正常 pre-commit 的 lint、typecheck、boundary、5584 pass / 1 skip 全通过。
-- [x] [正式 CI 35357476827](https://github.com/op7418/CodePilot/actions/runs/35357476827) 全部 success：source、macOS 签名/公证与包健康、Windows、Linux 双架构、Intel universal 启动/SQLite、release。
-- [x] [公开 Release](https://github.com/op7418/CodePilot/releases/tag/v0.67.16) 已于 2026-09-18 15:24:23 UTC 发布；非 draft、非 prerelease、Latest=true、immutable=true，精确 20 资产，正文与 RELEASE_NOTES 一致。
-- [x] 全部公开资产 API SHA-256 digest 与 checksum 对齐；实际下载 universal ZIP、Windows NSIS、两份 metadata 和全部 blockmap，验证下载字节 SHA-256、metadata 版本/单一同版本 URL/size/SHA-512 与 checksum coverage；无 Linux updater metadata。临时独立审计脚本初次未归一化 checksum 合法 `./` 前缀而失败，修正后通过，非发布资产问题。
-- [x] 公开 universal ZIP 内 Electron 与 standalone 版本均为 0.67.16；编译产物包含 AI Studio preset、Gemini 3.8、native_step 和保存失败提示码。仅作功能存在性证据，不替代真实调用。
-
-证据目录：`/private/tmp/codepilot-v0.67.16-public/` 的 `ci.json`、`release.json`、`latest.json`、`audit.log`、`package-audit.log`。Jev 按用户决定未接入。真实 Gemini 写作/工具/压缩后续聊、Windows 多模型三轮与重开、旧有运行期恢复/soak 仍保持未验证，不因 Shipped 自动关闭。

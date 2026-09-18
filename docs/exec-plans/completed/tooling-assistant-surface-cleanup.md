@@ -6,7 +6,7 @@
 >
 > 不属于本计划：合并 Skills / MCP / CLI 数据模型、新增统一启用开关、把内置 MCP 做成可编辑 server、CLI update endpoint、Settings 内 Assistant/Memory/Heartbeat/Tasks 面板的 UI 重做。
 >
-> 上游：Round 2 完成 + Chat 稳定化收口（见 [chat-run-checkpoint.md](../deferred/chat-run-checkpoint.md)）。
+> 上游：Round 2 完成 + Chat 稳定化收口（见 [chat-run-checkpoint.md](./chat-run-checkpoint.md)）。
 > 下游：Phase 2E 待定。
 
 ## 概览
@@ -766,7 +766,7 @@ R1 修完三条交互回归后，新一轮 review 又发现两条 P2 状态同�
 ### 用户痛点
 
 Survey 跟 plan doc 之间有冲突：
-- `docs/exec-plans/superseded/scheduled-tasks-notifications.md` 顶部状态表 Phase 1-4 全部 "📋 待开始"
+- `docs/exec-plans/active/scheduled-tasks-notifications.md` 顶部状态表 Phase 1-4 全部 "📋 待开始"
 - 代码 survey 找到：`task-scheduler.ts` 实现 + 单测 + `notification-mcp.ts` exposes 4 tools + `AssistantWorkspaceSection.tsx:543-585` 有 list + delete UI
 
 **真实情况不明**——直接给 Settings 打 stable 徽章会继续误导；先核准。
@@ -785,7 +785,7 @@ P2-4 反馈采纳：先核准事实再做 UI 决策。
   5. UI 管理（list / delete / toggle 真改 backend？）
 - 用一次实际跑通的 smoke（chat 里调用 codepilot_schedule_task → 等触发 → 看通知 → 看日志）
 - 把核准结论写入：
-  - `docs/exec-plans/superseded/scheduled-tasks-notifications.md` 顶部状态表（如果实际已交付，状态表得更新）
+  - `docs/exec-plans/active/scheduled-tasks-notifications.md` 顶部状态表（如果实际已交付，状态表得更新）
   - `docs/research/settings-feature-stability-audit-2026-04-30.md` 新文件，含每个 feature 的清单结果 + 建议分类（stable / preview / hidden）
 - 把 doc-vs-code 漂移记入 tech-debt tracker
 
@@ -850,8 +850,8 @@ P2-4 反馈采纳：先核准事实再做 UI 决策。
 
 ## 反向引用
 
-- 上一阶段：[chat-run-checkpoint.md](../deferred/chat-run-checkpoint.md)（Round 1+2 完成，Round 3 暂缓）
+- 上一阶段：[chat-run-checkpoint.md](./chat-run-checkpoint.md)（Round 1+2 完成，Round 3 暂缓）
 - Settings IA 历史：见 `../completed/settings-ia.md`（Phase 2C.1-2C.6 已完成）
-- Scheduled Tasks 老 plan：[scheduled-tasks-notifications.md](../superseded/scheduled-tasks-notifications.md)（状态表跟代码现实有漂移，本期 2D.5 核准）
+- Scheduled Tasks 老 plan：[scheduled-tasks-notifications.md](./scheduled-tasks-notifications.md)（状态表跟代码现实有漂移，本期 2D.5 核准）
 - 内置 MCP 数据来源：`src/lib/{memory-search,notification,cli-tools,dashboard,media-import,image-gen}-mcp.ts` + `src/lib/widget-guidelines.ts`
 - 注册逻辑入口：`src/lib/claude-client.ts:700-823`
