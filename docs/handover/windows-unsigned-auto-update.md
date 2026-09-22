@@ -77,7 +77,7 @@ stable Release 必须包含：
 - Linux：x64/arm64 AppImage/deb/rpm，但没有 `latest-linux*.yml`。
 - 全部平台：`SHA256SUMS.txt` 与 build provenance attestations。
 
-`latest.yml` 必须以裸 basename 精确引用当前版本完整 NSIS installer；`latest-mac.yml` 同样精确引用当前版本 universal ZIP。central verifier 拒绝绝对/带路径 URL、旧版本或额外 release payload，并按解析后的 checksum 文件名集合核对 version、SHA-512、size、外置 blockmap 存在性与 coverage，不能用字符串前缀关系蒙混。builder 的 `blockMapSize` 是嵌入式 blockmap 字段，Mac ZIP/完整 NSIS 的原生 metadata 不包含它，不能把它误当外置 sidecar 大小。禁止手写/覆盖 metadata、复用版本或移动 tag。
+`latest.yml` 必须以裸 basename 精确引用当前版本完整 NSIS installer；`latest-mac.yml` 同样精确引用当前版本 universal ZIP。central verifier 拒绝绝对/带路径 URL、旧版本或额外 release payload，并按解析后的 checksum 文件名集合核对 version、SHA-512、size、blockMapSize 与 coverage，不能用字符串前缀关系蒙混。禁止手写/覆盖 metadata、复用版本或移动 tag。
 
 ## 7. 验证矩阵
 

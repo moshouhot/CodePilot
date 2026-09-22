@@ -2,7 +2,7 @@
 
 > 创建时间：2026-09-14
 > 最后更新：2026-09-14
-> 状态：Shipped — v0.67.16；平台无关路由身份修复已发布，Windows 真机及其他同码来源仍待验证。
+> 状态：Code complete + Tests pass；未提交、未发布；用户明确授权“修一下”。
 
 ## 背景与取舍
 
@@ -57,7 +57,3 @@
 
 
 最终验证（2026-09-14，未提交）：`npm run test` EXIT=0，typecheck + harness boundary + 5572 tests：5571 pass / 0 fail / 1 existing skip（29.6s，`/tmp/codepilot-685-full-final.log`）。scoped ESLint 0 error / 5 处既有 warning；hooks、docs-drift、diff 检查通过。本次 F1/F2/F3 全部完成，计划归档，独立复审与正式包真机验收仍是后续边界，不标记 Review passed / Smoke passed / Shipped。
-
-## v0.67.16 发布回写（2026-09-18）
-
-修复随 `17c716c6` / `v0.67.16` Shipped；[正式 CI](https://github.com/op7418/CodePilot/actions/runs/35357476827) 全部成功，[Release](https://github.com/op7418/CodePilot/releases/tag/v0.67.16) Latest / immutable 和 20 项资产均已复核。最终全量 5584 pass / 1 skip，原路由定向测试包含在内。Windows MiMo/MiniMax 连续三轮与重开仍待真实包验收；升级后无唯一映射的旧会话需重选，已写进 Release Notes。生产反馈是否停增尚未验证。

@@ -2,8 +2,6 @@
 
 > 技术实现见 [docs/handover/chat-composer-redesign.md](../handover/chat-composer-redesign.md)
 
-> **2026-08-26 T3 收口更新**：本文保留 April 的判断演化；其中“模型选择器不加搜索”“输入框外仍显示代码/计划”已被真实 catalog 与 T3 交互复核推翻。统一选择器左侧主体是 Runtime，Favorites 固定在其上方并保存 Runtime+Provider+Model 完整组合；右侧按 Provider 小标题分组列该 Runtime 可用模型。reasoning/context option 合成一个 capability 菜单，权限与 Run 状态收进 MessageInput footer，Run/上下文紧邻发送键，独立 Runtime selector 已移除。Plan 语义没有删除，而是作为 Permission 中的“只读规划”硬权限档位保留。
-
 ## 起点：Chat 页是工具集合，还是 Agent 工作入口
 
 重构前的聊天页实际上是一个"按钮收纳柜"：
@@ -26,8 +24,8 @@
 不是说功能要砍，而是把"用户每次发消息前不需要决定的事"从视觉决定区移走：
 
 - **不要让用户主动选**：模式 / 权限 / 模型几乎从来不动 → 默认态视觉权重压到最低（隐形 select，hover 才显形）
-- **不要让用户拼**：本次会用什么 Runtime / 什么 Provider / 什么权限 → Runtime 与模型路线合成一个选择入口，权限保持相邻，不要散成多个互相漂移的 chip
-- **不要重复说**（April 历史判断，2026-08-26 superseded）：统一 Picker 的 trigger 必须显示 Runtime 图标 + 模型，Composer 不再另放独立 Runtime 标签
+- **不要让用户拼**：本次会用什么 Runtime / 什么 Provider / 什么权限 → 合一个面板一次说清，不要散成多个 chip 让用户脑内拼装
+- **不要重复说**：底部已经显示当前 Runtime → 模型选择器顶部就别再写一遍 Runtime 名
 
 ### 第二原则：默认无形 + 错误才上色
 
@@ -47,7 +45,7 @@
 - "已固定" 是用户主动选过的状态，不是错误，所以默认态也是浅灰文字（不是 chip）
 - "Auto" 是默认态，根本不显示
 - 健康度绿色 dot 在常态完全消失（之前一直绿着，给用户造成"健康度是不是个我得管理的指标"的负担）
-- Runtime 信息常驻在统一 Picker trigger 中（这是真信息，告诉你“现在用什么引擎在跑”），但不再有第二个独立控件
+- Runtime 标签常驻（这是真信息，告诉你"现在用什么引擎在跑"）
 - 出问题才上色：runtime fallback / pinned-invalid / no compatible provider / health warn 上 status-pair chip
 
 ### 第三原则：解释 vs 修改要分开
@@ -68,9 +66,9 @@ Codex review 提出的 Run 状态聚合面板是这轮的关键改造。底层�
 
 Codex review 建议给模型选择器加搜索框 + 顶部置顶 "当前默认 / 推荐 / 最近使用" 三栏。
 
-April 当时的决定是：**不加搜索框**，只加最近使用。2026-08-25 该决定被实际 catalog 规模与多 provider instance route 需求 supersede：当前 picker 恢复搜索，并把搜索对象从“模型名”升级为 Runtime-compatible 的 Provider + 模型路线。2026-08-26 又进一步将收藏定义为 Runtime + Provider + Model 完整组合，入口固定在 Runtime 列表上方，一次点击完成整条路线切换。
+我们最终的决定：**不加搜索框**，但加"最近使用"置顶（最多 3 项）。
 
-当时理由（作为历史保留）：
+理由：
 - 模型选择器不是"模型市场"，不应该鼓励用户搜索海量模型
 - 我们的用户主要是切回刚用过的 1-2 个模型，最近使用列表覆盖 80% 场景
 - 搜索框加进来后必然要做高亮 / 模糊匹配 / 键盘导航 / 占位文案，引入设计复杂度
@@ -119,7 +117,7 @@ April 当时的决定是：**不加搜索框**，只加最近使用。2026-08-25
 
 用户进入聊天页，第一眼看到的是：
 - 一个紧凑输入框（柔光阴影、24px 圆角）
-- 输入框内部 footer：左侧是 Runtime+模型统一选择器、能力摘要、统一权限；右侧是 Run 状态与发送。独立 Runtime、`代码 / 计划` 行和输入框外 ActionBar 已移除
+- 输入框下方两侧：左侧 `代码` `默认权限`（浅灰文字，几乎隐形）；右侧 `Claude Code · 16%`（一行状态文本）
 - 异常时左/右某处变成醒目 chip + 警告色
 
 视觉重量集中在：输入框本身（用户当下要做的事）。其它一切是"待命"——我在那里、需要时点开就有。
@@ -159,7 +157,7 @@ April 当时的决定是：**不加搜索框**，只加最近使用。2026-08-25
 - 上下文：决定 Agent 看到了什么信息 — 必须可见可移除
 - 发送：用户对消息边界的决定权 — 永远显式（按 Enter 或点提交按钮，不是 AI 自动发）
 
-这四件事在 Chat 页都有明确的 UI surface：底部工具栏左侧是权限 / 模型选择，输入框上方是 context chips，Run/上下文状态与发送按钮组成右侧末端操作区。它们的视觉权重可以低（隐形 select / 浅灰文字），但**不能消失**。
+这四件事在 Chat 页都有明确的 UI surface：底部工具栏左侧是权限 / 模型 toggle，输入框上方是 context chips，输入框右下角是发送按钮。它们的视觉权重可以低（隐形 select / 浅灰文字），但**不能消失**。
 
 ### 3. AI 能理解 / 调度的东西不要常驻按钮化
 

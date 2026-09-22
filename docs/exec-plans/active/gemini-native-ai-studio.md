@@ -1,8 +1,7 @@
 # Gemini AI Studio Native 接入与能力补齐
 
 > 创建时间：2026-09-18
-> 最后更新：2026-09-22
-> 发布状态：Shipped — v0.67.17（含9月19日工具参数修复与SDK执行校验）；正式CI和公开20资产审计通过，真实AI Studio问候已通过，完整工具执行/Windows会话smoke仍待执行。
+> 最后更新：2026-09-18
 
 ## 用户目标与取舍
 
@@ -18,7 +17,6 @@
 | 1 | 官方 API 添加 AI Studio，Native 可选 3.8 Flash | Code complete | 预设/身份/Runtime 排除/目录 |
 | 2 | 思考档位、工具与重开续聊完整工作 | Tests pass（离线） | 真 SDK + 模拟 Google SSE + 真 DB 多回合、Bridge owner gate |
 | 3 | 能力审计与验证 | Tests pass；UI Smoke passed（fixture）；用户报告 Claude 已复核 | full 5584 pass / 1 skip，两份 spec 四 worker 并行 4 pass；真实 API 与 Windows packaged 尚未执行 |
-| 4 | 修复已授权视频工具导致 Gemini 普通聊天 400 | Tests pass；Smoke passed（真实问候） | 定向 50/50；full 5590 pass / 1 skip / 0 fail；SDK 非法调用阻断及合法调用对照通过；真实问候通过，真实工具执行仍未验证 |
 
 ## 设计与回归边界
 
@@ -72,9 +70,6 @@
 
 ## 决策日志
 
-- 2026-09-20：P3-2 临时复核转为正式 SDK SSE 回归，新增 7 拒绝与 6/10 执行对照；定向 50/50、typecheck + Harness boundary + full 5590 pass / 1 skip / 0 fail（28.7s）。未提交，完整审查裁决未收到，不标记 Review passed。
-
-- 2026-09-19：用户报告真实问候 400 并授权修复。工作区未提交；选择仅修 Native 视频工具的数字枚举声明，不升级 SDK、不将时长改为字符串、不移除视频能力。修前新增回归 2 pass / 1 fail，修后定向 47/47；真实原会话问候成功。全量首次因沙箱禁止 loopback listen 导致 8 fail；允许本地监听后，typecheck + Harness boundary + 5587 pass / 1 skip / 0 fail（28.8s）。
 - 2026-09-18：用户授权实现，仅 Native；保留现有工作区中 #685 等未提交改动。
 - 2026-09-18：Code complete + Tests pass；本地 UI fixture smoke 通过。未 commit/push/发版；真实 API smoke 保持待执行。
 
@@ -104,58 +99,3 @@
 - Release Notes 明示真实 Gemini 与 Windows packaged 缺口，不宣称该部分 Smoke passed；CI 将执行签名、公证、三平台启动与资产图门禁。尚未标记 Shipped。
 
 - 保存失败提示独立隔离 UI：5/5 通过，日志 `/tmp/codepilot-06716-save-ui.log`；已清理本次 E2E 自动生成的 tsconfig 路径，保留原配置。
-
-## Shipped — v0.67.16（2026-09-18）
-
-- [x] 提交 `17c716c6f3ca613e2e52bf18cebca8afa5eabe63`（61 文件）；main 和全新不可变 `v0.67.16` tag 已推送。正常 pre-commit 的 lint、typecheck、boundary、5584 pass / 1 skip 全通过。
-- [x] [正式 CI 35357476827](https://github.com/op7418/CodePilot/actions/runs/35357476827) 全部 success：source、macOS 签名/公证与包健康、Windows、Linux 双架构、Intel universal 启动/SQLite、release。
-- [x] [公开 Release](https://github.com/op7418/CodePilot/releases/tag/v0.67.16) 已于 2026-09-18 15:24:23 UTC 发布；非 draft、非 prerelease、Latest=true、immutable=true，精确 20 资产，正文与 RELEASE_NOTES 一致。
-- [x] 全部公开资产 API SHA-256 digest 与 checksum 对齐；实际下载 universal ZIP、Windows NSIS、两份 metadata 和全部 blockmap，验证下载字节 SHA-256、metadata 版本/单一同版本 URL/size/SHA-512 与 checksum coverage；无 Linux updater metadata。临时独立审计脚本初次未归一化 checksum 合法 `./` 前缀而失败，修正后通过，非发布资产问题。
-- [x] 公开 universal ZIP 内 Electron 与 standalone 版本均为 0.67.16；编译产物包含 AI Studio preset、Gemini 3.8、native_step 和保存失败提示码。仅作功能存在性证据，不替代真实调用。
-
-证据目录：`/private/tmp/codepilot-v0.67.16-public/` 的 `ci.json`、`release.json`、`latest.json`、`audit.log`、`package-audit.log`。Jev 按用户决定未接入。真实 Gemini 写作/工具/压缩后续聊、Windows 多模型三轮与重开、旧有运行期恢复/soak 仍保持未验证，不因 Shipped 自动关闭。
-
-## 真实问候 400 修复（2026-09-19）
-
-- **Signal / Triage**：用户在 Dev 的 `cfc4d79370fe97ed2661999b602cfc9a` 会话只发“你好”，Gemini 返回 `400 INVALID_ARGUMENT`，定位 `function_declarations[15]` 的 `duration.any_of[*].enum` 数字 6/10。Grok OAuth 可用时，Native 自动挂载 `codepilot_generate_video`；模型选择工具之前就会校验所有声明，因此影响普通聊天。原离线回归只用 lookup 工具，未覆盖真实媒体工具集。
-- **Fix**：`builtin-tools/media.ts` 的 duration 改为 `z.number().pipe(z.union([z.literal(6), z.literal(10)]))` 并添加取值描述；SDK 使用输入 JSON Schema，执行验证仍保留严格数值范围，输出给视频 backend 的类型保持 `6 | 10`。无需改 Google 请求 transport、MCP/Codex schema 或依赖。
-- **Verify**：新增媒体工具 gate false/true 的实际 Google SDK wire 对照，递归检查 enum 值，校验数值类型及取值描述；另测省略/6/10 接受、0/7/小数/负数/字符串/null/布尔拒绝。修前 gate=true 测试失败，其他两项通过；修后 Gemini + Native media + xAI Imagine 47/47。全量 `npm run test` 在允许本地监听的环境下通过：typecheck + Harness boundary + 5587 pass / 1 skip / 0 fail（28.8s）。
-- **Guardrail**：`Runtime.md` 固化真实工具装配和 Google 参数枚举兼容边界。依据：[Google FunctionDeclaration / Schema](https://ai.google.dev/api/generate-content) 与本地 `@ai-sdk/google` 的 `google-prepare-tools.ts` / `convert-json-schema-to-openapi-schema.ts`。
-- **独立残余**：Dev 日志中的 notify/widget/memory 工具 factory 与 Harness Home loader `is not a function` 仍未修复，不属于本次枚举 400 根因；不能将此次问候成功解读为这些能力可用。
-
-- [x] 离线复现原错误及工具授权 gate 反例。
-- [x] 修复参数声明并保留执行验证。
-- [x] 定向 47/47、scoped ESLint、真实原会话问候通过。
-- [x] 全量回归、scoped ESLint、hooks lint、docs drift 与 diff whitespace 检查。
-
-### 补充 Smoke Ledger
-
-| Date | Runtime | Provider | Model | 凭据形态 | 场景 | Result | Evidence |
-|---|---|---|---|---|---|---|---|
-| 2026-09-19 | codepilot_runtime | 用户当前 AI Studio Provider | gemini-3.8-flash | 已配置 API key；未输出凭据 | Dev 原会话 POST /api/chat，保留包括视频在内的 24 工具，请求仅回复问候 | Smoke passed：正文“你好”、finishReason=stop、toolsUsed=[]、DB assistant completed | session `cfc4d79370fe97ed2661999b602cfc9a`；`/tmp/gemini-schema-live.sse`；未触发视频生成或工具执行 |
-
-本次离线日志：`/tmp/gemini-schema-before.log`、`/tmp/gemini-schema-targeted.log`、`/tmp/gemini-schema-full.log`（sandbox listen 失败）、`/tmp/gemini-schema-full-unrestricted.log`。未提交、未推送、未发版。
-
-
-## P3-2 SDK 执行验证补充（2026-09-20）
-
-用户转述独立复核的补充：临时脚本已清理，建议将非法工具调用的 SDK 级验证正式纳入仓库。当前仅收到补充，没有收到完整 findings 或审查裁决，不据此标记 Review passed。
-
-- [x] 在 `gemini-native.test.ts` 使用生产 `createMediaTools`，只覆盖 execute 为记录参数的 stub；模拟 Google SSE 返回视频 functionCall，交给真实 `streamText` 消费。
-- [x] duration=7：断言对应 tool-call.invalid=true、同 call ID 的 tool-error、无 tool-result、execute 零调用。
-- [x] duration=6/10：各断言正常 tool-result、无 tool-error、execute 恰好一次且收到原数值，避免用“所有工具都不执行”的假通过代替校验。
-- [x] 定向 Gemini / Native media / xAI Imagine 50/50，scoped ESLint 通过；仅 fixture，无真实视频调用。
-- [x] 全量 typecheck + Harness boundary + 5590 pass / 1 skip / 0 fail（28.7s）；hooks lint、docs drift 与 diff whitespace 检查通过。
-
-验证日志：`/tmp/gemini-sdk-validation-targeted.log`、`/tmp/gemini-sdk-validation-full.log`。仅测试与现有文档追加，仍为原来的 5 个工作区改动文件，未提交。
-
-## v0.67.17 发布准备（2026-09-22）
-
-用户明确授权发版。数字 duration wire schema 与 SDK 执行校验单独提交，未与 Memory 修复混合；当前完整工作区门禁5704 pass / 0 fail / 1 skip。真实问候证据沿用09-19，完整工具生成/Windows packaged smoke仍不冒称已验证。提交后由正式tag CI完成签名/公证/三平台资产门禁。
-
-
-## v0.67.17 发布结果（2026-09-22）
-
-数字duration声明修复与SDK非法调用阻断回归随 [v0.67.17](https://github.com/op7418/CodePilot/releases/tag/v0.67.17) **Shipped**，tag指向4ddcd1a0f7931fc2ba3d3a1cf2802782bdc4712e。[CI 35679941503](https://github.com/op7418/CodePilot/actions/runs/35679941503)全部成功；公开Release为Latest、immutable、非draft/prerelease，20资产及实际Mac/Windows更新包SHA-512/size/blockmap核验通过。公开universal ZIP的app与standalone版本均0.67.17。
-
-证据见 `/private/tmp/codepilot-v0.67.17-public/` 的ci.json、release.json、latest.json、audit.log、package-audit.log。真实完整工具执行与Windows会话smoke仍待执行；发布不替代这些验收。
